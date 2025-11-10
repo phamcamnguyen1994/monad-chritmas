@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useBox } from '@react-three/cannon'
 import { useKeyboardControls } from '@react-three/drei'
@@ -11,6 +11,10 @@ const tempVec = new THREE.Vector3()
 const upVector = new THREE.Vector3(0, 1, 0)
 const quat = new THREE.Quaternion()
 const euler = new THREE.Euler()
+
+const SAFE_Y_THRESHOLD = -6
+const RESPAWN_HEIGHT = 32
+const VISUAL_OFFSET_Y = 0.45
 
 const ChogsSled = forwardRef(function ChogsSled(
   {
@@ -30,6 +34,8 @@ const ChogsSled = forwardRef(function ChogsSled(
   const [, getKeys] = useKeyboardControls()
   const velocityRef = useRef(new THREE.Vector3())
 
+  const objectRef = useRef(null)
+
   const [physicsRef, api] = useBox(
     () => ({
       args: [1.1, 0.5, 2.2],
@@ -41,29 +47,35 @@ const ChogsSled = forwardRef(function ChogsSled(
       allowSleep: false,
       ...props,
     }),
-    undefined,
+    objectRef,
     [position, driftDamping]
   )
 
-  const objectRef = useRef(null)
-  const setCombinedRef = useCallback(
-    (value) => {
-      physicsRef(value)
-      objectRef.current = value
-    },
-    [physicsRef]
-  )
+  useEffect(() => {
+    api.position.set(position[0], position[1], position[2])
+    api.velocity.set(0, 0, 0)
+    api.angularVelocity.set(0, 0, 0)
+  }, [api.position, api.velocity, api.angularVelocity, position])
 
-  useEffect(
-    () =>
-      api.velocity.subscribe((velocity) => {
-        velocityRef.current.fromArray(velocity)
-        if (typeof onVelocityChange === 'function') {
-          onVelocityChange(velocity)
-        }
-      }),
-    [api.velocity, onVelocityChange]
-  )
+  useEffect(() => {
+    const unsubPosition = api.position.subscribe(([x, y, z]) => {
+      if (y < SAFE_Y_THRESHOLD) {
+        api.position.set(x, RESPAWN_HEIGHT, z)
+        api.velocity.set(0, 0, 0)
+        api.angularVelocity.set(0, 0, 0)
+      }
+    })
+    const unsubVelocity = api.velocity.subscribe((velocity) => {
+      velocityRef.current.fromArray(velocity)
+      if (typeof onVelocityChange === 'function') {
+        onVelocityChange(velocity)
+      }
+    })
+    return () => {
+      unsubPosition?.()
+      unsubVelocity?.()
+    }
+  }, [api.position, api.velocity, api.angularVelocity, onVelocityChange])
 
   useImperativeHandle(ref, () => ({
     object: objectRef.current,
@@ -147,17 +159,14 @@ const ChogsSled = forwardRef(function ChogsSled(
   })
 
   return (
-    <group ref={setCombinedRef} castShadow>
-      <mesh position={[0, -0.08, 0]} castShadow receiveShadow>
+    <group ref={physicsRef} castShadow>
+      <mesh position={[0, VISUAL_OFFSET_Y - 0.08, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.2, 0.26, 2.2]} />
         <meshStandardMaterial color="#e2e8f0" roughness={0.35} metalness={0.28} />
       </mesh>
 
-      <group position={[0, -0.18, 0]}>
-        <mesh position={[0, 0, 0.56]}
-          castShadow
-          receiveShadow
-        >
+      <group position={[0, VISUAL_OFFSET_Y - 0.18, 0]}>
+        <mesh position={[0, 0, 0.56]} castShadow receiveShadow>
           <cylinderGeometry args={[0.09, 0.09, 2.2, 14]} />
           <meshStandardMaterial color="#94a3b8" roughness={0.4} metalness={0.6} />
         </mesh>
@@ -167,17 +176,17 @@ const ChogsSled = forwardRef(function ChogsSled(
         </mesh>
       </group>
 
-      <mesh position={[0, 0.46, -0.82]} rotation={[Math.PI / 1.9, 0, 0]} castShadow>
+      <mesh position={[0, VISUAL_OFFSET_Y + 0.28, -0.82]} rotation={[Math.PI / 1.9, 0, 0]} castShadow>
         <torusGeometry args={[0.42, 0.06, 16, 28]} />
         <meshStandardMaterial color="#1f2937" roughness={0.7} metalness={0.2} />
       </mesh>
 
-      <mesh position={[0, 0.38, 0]} castShadow>
+      <mesh position={[0, VISUAL_OFFSET_Y + 0.18, 0]} castShadow>
         <boxGeometry args={[0.6, 0.18, 1.2]} />
         <meshStandardMaterial color="#0f172a" roughness={0.6} metalness={0.18} />
       </mesh>
 
-      <group position={[0, 0.65, 0]}>
+      <group position={[0, VISUAL_OFFSET_Y + 0.45, 0]}>
         <mesh castShadow>
           <sphereGeometry args={[0.42, 24, 18]} />
           <meshStandardMaterial color="#f97316" emissive="#fb923c" emissiveIntensity={0.25} roughness={0.45} metalness={0.18} />
