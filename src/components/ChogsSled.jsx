@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { useBox } from '@react-three/cannon'
 import { useKeyboardControls } from '@react-three/drei'
@@ -30,7 +30,7 @@ const ChogsSled = forwardRef(function ChogsSled(
   const [, getKeys] = useKeyboardControls()
   const velocityRef = useRef(new THREE.Vector3())
 
-  const [sledRef, api] = useBox(
+  const [physicsRef, api] = useBox(
     () => ({
       args: [1.1, 0.5, 2.2],
       mass: 4.5,
@@ -45,6 +45,15 @@ const ChogsSled = forwardRef(function ChogsSled(
     [position, driftDamping]
   )
 
+  const objectRef = useRef(null)
+  const setCombinedRef = useCallback(
+    (value) => {
+      physicsRef(value)
+      objectRef.current = value
+    },
+    [physicsRef]
+  )
+
   useEffect(
     () =>
       api.velocity.subscribe((velocity) => {
@@ -57,12 +66,12 @@ const ChogsSled = forwardRef(function ChogsSled(
   )
 
   useImperativeHandle(ref, () => ({
-    object: sledRef.current,
+    object: objectRef.current,
     api,
   }))
 
   useFrame((state, delta) => {
-    const sled = sledRef.current
+    const sled = objectRef.current
     if (!sled || delta <= 0) return
 
     if (!enabled) {
@@ -138,7 +147,7 @@ const ChogsSled = forwardRef(function ChogsSled(
   })
 
   return (
-    <group ref={sledRef} castShadow>
+    <group ref={setCombinedRef} castShadow>
       <mesh position={[0, -0.08, 0]} castShadow receiveShadow>
         <boxGeometry args={[1.2, 0.26, 2.2]} />
         <meshStandardMaterial color="#e2e8f0" roughness={0.35} metalness={0.28} />
