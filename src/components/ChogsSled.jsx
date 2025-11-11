@@ -24,7 +24,7 @@ const ChogsSled = forwardRef(function ChogsSled(
     turnStrength = 18,
     brakeStrength = 24,
     maxSpeed = 28,
-    driftDamping = 0.24,
+    driftDamping = 0.12,
     onVelocityChange,
     respawnHeight = 28,
     getGroundHeight,
@@ -148,8 +148,8 @@ const ChogsSled = forwardRef(function ChogsSled(
         const offset = sled.position.y - minAllowedY
         if (Math.abs(offset) > 0.001) {
           api.position.set(sled.position.x, minAllowedY, sled.position.z)
-          velocityRef.current.set(velocity.x * 0.45, 0, velocity.z * 0.45)
-          api.velocity.set(velocity.x * 0.45, 0, velocity.z * 0.45)
+          velocityRef.current.set(velocity.x, 0, velocity.z)
+          api.velocity.set(velocity.x, 0, velocity.z)
           api.angularVelocity.set(0, 0, 0)
         } else if (velocity.y < 0) {
           velocityRef.current.set(velocity.x, 0, velocity.z)

@@ -231,6 +231,7 @@ function ExpeditionStatus({ speed }) {
 
 const SLED_HALF_HEIGHT = 0.5
 const SLED_CLEARANCE = 0.02
+const DEFAULT_DAMPING = 0.12
 
 export default function SailingScene({ walletConnected, walletAddress, onConnect, onDisconnect }) {
   const sledRef = useRef(null)
@@ -308,6 +309,7 @@ export default function SailingScene({ walletConnected, walletAddress, onConnect
                   position={[0, spawnHeight, 0]}
                   respawnHeight={spawnHeight}
                   onVelocityChange={handleVelocityChange}
+                  driftDamping={DEFAULT_DAMPING}
                   getGroundHeight={heightSamplerRef.current}
                 />
                 {debugEnabled ? (
