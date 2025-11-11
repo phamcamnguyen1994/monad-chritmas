@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { Environment, KeyboardControls, Sky } from '@react-three/drei'
+import { Html, Environment, KeyboardControls, Sky } from '@react-three/drei'
 import * as THREE from 'three'
 import { Physics } from '@react-three/cannon'
 import WinterWorld from '../components/WinterWorld'
@@ -50,7 +50,71 @@ function WinterCameraRig({ sledRef }) {
   return null
 }
 
-function ControlsHint() {
+function DebugTelemetry({ sledRef, plateauHeight, sampleHeight }) {
+  const [telemetry, setTelemetry] = useState({
+    position: [0, 0, 0],
+    velocity: [0, 0, 0],
+    slopeFactor: 0,
+    accelerating: false,
+    ground: null,
+    valid: false,
+  })
+  const lastUpdateRef = useRef(0)
+
+  useFrame((state) => {
+    const elapsed = state.clock.elapsedTime
+    if (elapsed - lastUpdateRef.current < 0.2) return
+    lastUpdateRef.current = elapsed
+
+    const sledHandle = sledRef.current
+    const sled = sledHandle?.object
+    if (!sled) {
+      setTelemetry((prev) => (prev.valid ? { ...prev, valid: false } : prev))
+      return
+    }
+
+    const position = [sled.position.x, sled.position.y, sled.position.z]
+    const velocityVector = sledHandle.velocity
+    const velocity = velocityVector
+      ? [velocityVector.x, velocityVector.y, velocityVector.z]
+      : [0, 0, 0]
+
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(sled.quaternion)
+    const slope = THREE.MathUtils.clamp(1 - up.y, 0, 1)
+    const ground = typeof sampleHeight === 'function' ? sampleHeight(position[0], position[2]) : null
+
+    setTelemetry({
+      position,
+      velocity,
+      slopeFactor: Number(slope.toFixed(3)),
+      accelerating: slope > 0.08,
+      ground,
+      valid: true,
+    })
+  })
+
+  if (!telemetry.valid) return null
+
+  const plateauLabel = plateauHeight != null ? plateauHeight.toFixed(2) : '??'
+  const groundLabel = telemetry.ground != null ? telemetry.ground.toFixed(2) : '??'
+
+  return (
+    <Html position={[0, 0, 0]} transform={false} wrapperClass="pointer-events-none">
+      <div className="pointer-events-none absolute top-1/2 left-8 -translate-y-1/2 space-y-2 text-xs text-white/75">
+        <div className="pointer-events-auto rounded-2xl border border-white/20 bg-black/45 px-4 py-3 font-mono">
+          <p>plateau ≈ {plateauLabel}</p>
+          <p>ground ≈ {groundLabel}</p>
+          <p>pos: {telemetry.position.map((v) => v.toFixed(2)).join(', ')}</p>
+          <p>vel: {telemetry.velocity.map((v) => v.toFixed(2)).join(', ')}</p>
+          <p>slope: {telemetry.slopeFactor}</p>
+          <p>assist: {telemetry.accelerating ? 'ON' : 'off'}</p>
+        </div>
+      </div>
+    </Html>
+  )
+}
+
+function ControlsHint({ debugEnabled, onToggleDebug }) {
   return (
     <div className="pointer-events-none absolute bottom-16 left-8">
       <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-white/15 bg-white/10 px-5 py-3 text-white/85 backdrop-blur">
@@ -64,6 +128,15 @@ function ControlsHint() {
           <span>Space: Hãm trượt</span>
           <span className="rounded-full border border-white/25 bg-white/10 px-3 py-1 text-white/80">Giữ đà</span>
         </div>
+        <button
+          type="button"
+          onClick={onToggleDebug}
+          className={`ml-2 rounded-full px-3 py-1 text-[10px] font-semibold tracking-[0.2em] ${
+            debugEnabled ? 'bg-emerald-400/90 text-emerald-950' : 'bg-white/10 text-white'
+          }`}
+        >
+          {debugEnabled ? 'Telemetry ON' : 'Telemetry OFF'}
+        </button>
       </div>
     </div>
   )
@@ -99,8 +172,8 @@ function ExpeditionOverlay({ walletConnected, walletAddress, onConnect, onDiscon
             <div
               className="h-full rounded-full bg-gradient-to-r from-sky-400 via-slate-200 to-emerald-300"
               style={{ width: `${Math.max(progress * 100, 6)}%` }}
-            />
-          </div>
+        />
+      </div>
           <span className="mt-1 text-[10px] text-white/55">Đã mở khóa: {visited} dApp · Quest: {totalQuests}</span>
         </div>
       </div>
@@ -156,14 +229,35 @@ function ExpeditionStatus({ speed }) {
   )
 }
 
+const SLED_HALF_HEIGHT = 0.5
+const SLED_CLEARANCE = 0.02
+
 export default function SailingScene({ walletConnected, walletAddress, onConnect, onDisconnect }) {
   const sledRef = useRef(null)
+  const winterWorldRef = useRef(null)
+  const heightSamplerRef = useRef(null)
+  const [plateauHeight, setPlateauHeight] = useState(null)
   const [speed, setSpeed] = useState(0)
+  const [spawnHeight, setSpawnHeight] = useState(12)
+  const [debugEnabled, setDebugEnabled] = useState(false)
+
+  const handleWinterWorldRef = useCallback((instance) => {
+    winterWorldRef.current = instance
+    if (instance && typeof instance.plateauHeight === 'number') {
+      setPlateauHeight(instance.plateauHeight)
+      heightSamplerRef.current = typeof instance.getHeightAt === 'function' ? instance.getHeightAt : null
+      setSpawnHeight(instance.plateauHeight + SLED_HALF_HEIGHT + SLED_CLEARANCE)
+    }
+  }, [])
 
   const handleVelocityChange = useCallback((velocity) => {
     if (!velocity) return
     const [x, , z] = velocity
     setSpeed(Math.sqrt(x * x + z * z))
+  }, [])
+
+  const handleTelemetryToggle = useCallback(() => {
+    setDebugEnabled((prev) => !prev)
   }, [])
 
   const physicsConfig = useMemo(
@@ -206,10 +300,23 @@ export default function SailingScene({ walletConnected, walletAddress, onConnect
             />
             <Environment preset="sunset" background={false} />
 
-            <Suspense fallback={null}>
+                <Suspense fallback={null}>
               <Physics {...physicsConfig}>
-                <WinterWorld size={420} segments={200} amplitude={18} />
-                <ChogsSled ref={sledRef} position={[0, 14, 0]} onVelocityChange={handleVelocityChange} />
+                <WinterWorld ref={handleWinterWorldRef} size={420} segments={200} amplitude={18} />
+                <ChogsSled
+                  ref={sledRef}
+                  position={[0, spawnHeight, 0]}
+                  respawnHeight={spawnHeight}
+                  onVelocityChange={handleVelocityChange}
+                  getGroundHeight={heightSamplerRef.current}
+                />
+                {debugEnabled ? (
+                  <DebugTelemetry
+                    sledRef={sledRef}
+                    plateauHeight={plateauHeight}
+                    sampleHeight={heightSamplerRef.current}
+                  />
+                ) : null}
               </Physics>
               <Snowfall />
             </Suspense>
@@ -220,12 +327,12 @@ export default function SailingScene({ walletConnected, walletAddress, onConnect
       </div>
 
       <ExpeditionOverlay
-        walletConnected={walletConnected}
-        walletAddress={walletAddress}
-        onConnect={onConnect}
-        onDisconnect={onDisconnect}
-      />
-      <ControlsHint />
+            walletConnected={walletConnected}
+            walletAddress={walletAddress}
+            onConnect={onConnect}
+            onDisconnect={onDisconnect}
+          />
+      <ControlsHint debugEnabled={debugEnabled} onToggleDebug={handleTelemetryToggle} />
       <ExpeditionStatus speed={speed} />
     </div>
   )

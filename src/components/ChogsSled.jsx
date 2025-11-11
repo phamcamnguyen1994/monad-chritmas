@@ -12,21 +12,22 @@ const upVector = new THREE.Vector3(0, 1, 0)
 const quat = new THREE.Quaternion()
 const euler = new THREE.Euler()
 
-const SAFE_Y_THRESHOLD = -6
-const RESPAWN_HEIGHT = 32
-const VISUAL_OFFSET_Y = 0.45
+const VISUAL_OFFSET_Y = 0.25
+const COLLIDER_HALF_HEIGHT = 0.25
 
 const ChogsSled = forwardRef(function ChogsSled(
   {
     position = [0, 8, 0],
     enabled = true,
     acceleration = 40,
-    downhillAssist = 18,
+    downhillAssist = 14,
     turnStrength = 18,
     brakeStrength = 24,
     maxSpeed = 28,
-    driftDamping = 0.12,
+    driftDamping = 0.24,
     onVelocityChange,
+    respawnHeight = 28,
+    getGroundHeight,
     ...props
   },
   ref
@@ -52,15 +53,23 @@ const ChogsSled = forwardRef(function ChogsSled(
   )
 
   useEffect(() => {
-    api.position.set(position[0], position[1], position[2])
+    let spawnY = position[1]
+    if (typeof getGroundHeight === 'function') {
+      const groundHeight = getGroundHeight(position[0], position[2])
+      if (groundHeight != null) {
+        spawnY = groundHeight + COLLIDER_HALF_HEIGHT
+      }
+    }
+    api.position.set(position[0], spawnY, position[2])
     api.velocity.set(0, 0, 0)
     api.angularVelocity.set(0, 0, 0)
-  }, [api.position, api.velocity, api.angularVelocity, position])
+  }, [api.position, api.velocity, api.angularVelocity, position, getGroundHeight])
 
   useEffect(() => {
+    const lowerBound = respawnHeight - 80
     const unsubPosition = api.position.subscribe(([x, y, z]) => {
-      if (y < SAFE_Y_THRESHOLD) {
-        api.position.set(x, RESPAWN_HEIGHT, z)
+      if (y < lowerBound) {
+        api.position.set(x, respawnHeight, z)
         api.velocity.set(0, 0, 0)
         api.angularVelocity.set(0, 0, 0)
       }
@@ -75,11 +84,13 @@ const ChogsSled = forwardRef(function ChogsSled(
       unsubPosition?.()
       unsubVelocity?.()
     }
-  }, [api.position, api.velocity, api.angularVelocity, onVelocityChange])
+  }, [api.position, api.velocity, api.angularVelocity, onVelocityChange, respawnHeight])
 
   useImperativeHandle(ref, () => ({
     object: objectRef.current,
     api,
+    velocity: velocityRef.current,
+    halfHeight: COLLIDER_HALF_HEIGHT,
   }))
 
   useFrame((state, delta) => {
@@ -104,6 +115,8 @@ const ChogsSled = forwardRef(function ChogsSled(
     forwardVector.set(0, 0, -1).applyQuaternion(quat).normalize()
     sideVector.set(1, 0, 0).applyQuaternion(quat).normalize()
 
+    let slopeFactor = 0
+
     if (forward > 0) {
       tempVec.copy(forwardVector).multiplyScalar(acceleration * delta)
       api.applyImpulse(tempVec.toArray(), [0, 0, 0])
@@ -121,10 +134,27 @@ const ChogsSled = forwardRef(function ChogsSled(
 
     if (horizontalSpeed < maxSpeed) {
       const upAxis = upVector.clone().applyQuaternion(quat)
-      const slopeFactor = THREE.MathUtils.clamp(1 - upAxis.y, 0, 1)
-      if (slopeFactor > 0.01) {
+      slopeFactor = THREE.MathUtils.clamp(1 - upAxis.y, 0, 1)
+      if (slopeFactor > 0.08) {
         tempVec.copy(forwardVector).multiplyScalar(slopeFactor * downhillAssist * delta)
         api.applyForce(tempVec.toArray(), [0, 0, 0])
+      }
+    }
+
+    if (typeof getGroundHeight === 'function') {
+      const groundHeight = getGroundHeight(sled.position.x, sled.position.z)
+      if (groundHeight != null) {
+        const minAllowedY = groundHeight + COLLIDER_HALF_HEIGHT
+        const offset = sled.position.y - minAllowedY
+        if (Math.abs(offset) > 0.001) {
+          api.position.set(sled.position.x, minAllowedY, sled.position.z)
+          velocityRef.current.set(velocity.x * 0.45, 0, velocity.z * 0.45)
+          api.velocity.set(velocity.x * 0.45, 0, velocity.z * 0.45)
+          api.angularVelocity.set(0, 0, 0)
+        } else if (velocity.y < 0) {
+          velocityRef.current.set(velocity.x, 0, velocity.z)
+          api.velocity.set(velocity.x, 0, velocity.z)
+        }
       }
     }
 
@@ -145,6 +175,11 @@ const ChogsSled = forwardRef(function ChogsSled(
       const clampFactor = 1 - maxSpeed / horizontalSpeed
       dampingForce.set(velocity.x, 0, velocity.z).multiplyScalar(-clampFactor * 0.6)
       api.applyImpulse(dampingForce.toArray(), [0, 0, 0])
+    }
+
+    if (!forward && !steer && !braking && slopeFactor <= 0.05 && horizontalSpeed < 0.12) {
+      api.velocity.set(0, 0, 0)
+      api.angularVelocity.set(0, 0, 0)
     }
 
     const targetYaw = Math.atan2(-velocity.x, -velocity.z)

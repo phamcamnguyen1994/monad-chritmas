@@ -13,6 +13,11 @@ const generateHeight = (x, z, scale, amplitude) => {
   return (ridge * 0.6 + valley * 0.4 + crest * 0.35) * amplitude
 }
 
+const smoothStep = (edge0, edge1, x) => {
+  const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
 const createTerrain = ({ size, segments, amplitude, colorStops }) => {
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments)
   geometry.rotateX(-Math.PI / 2)
@@ -20,12 +25,28 @@ const createTerrain = ({ size, segments, amplitude, colorStops }) => {
   const position = geometry.attributes.position
   const vertexCount = position.count
   const colors = new Float32Array(vertexCount * 3)
+  const heights = new Float32Array(vertexCount)
+
+  const plateauRadius = size * 0.12
+  const plateauBlend = plateauRadius * 1.8
+  const plateauHeight = amplitude * 0.12
 
   for (let i = 0; i < vertexCount; i += 1) {
     const x = position.getX(i)
     const z = position.getZ(i)
-    const height = generateHeight(x, z, 0.02, amplitude) + generateHeight(x, z, 0.005, amplitude * 0.6)
+    const baseHeight = generateHeight(x, z, 0.02, amplitude) + generateHeight(x, z, 0.005, amplitude * 0.6)
+    const radius = Math.sqrt(x * x + z * z)
+
+    let height = baseHeight
+    if (radius <= plateauRadius) {
+      height = plateauHeight
+    } else if (radius < plateauBlend) {
+      const blend = smoothStep(plateauRadius, plateauBlend, radius)
+      height = THREE.MathUtils.lerp(plateauHeight, baseHeight, blend)
+    }
+
     position.setY(i, height)
+    heights[i] = height
 
     const elevation = THREE.MathUtils.clamp((height + amplitude) / (amplitude * 2), 0, 1)
     const lower = Math.floor(elevation * (colorStops.length - 1))
@@ -43,12 +64,54 @@ const createTerrain = ({ size, segments, amplitude, colorStops }) => {
 
   const vertices = geometry.attributes.position.array.slice()
   const indices = geometry.index?.array ? geometry.index.array.slice() : undefined
+  const gridResolution = segments + 1
 
   return {
     geometry,
     vertices,
     indices,
+    heights,
+    plateauHeight,
+    plateauRadius,
+    size,
+    segments,
+    gridResolution,
   }
+}
+
+const sampleHeight = (terrain, x, z) => {
+  if (!terrain) return null
+  const { size, segments, gridResolution, heights } = terrain
+  const halfSize = size / 2
+  const step = size / segments
+
+  const gridX = (x + halfSize) / step
+  const gridZ = (z + halfSize) / step
+
+  if (gridX < 0 || gridZ < 0 || gridX > segments || gridZ > segments) return null
+
+  const x0 = Math.floor(gridX)
+  const z0 = Math.floor(gridZ)
+  const x1 = Math.min(x0 + 1, segments)
+  const z1 = Math.min(z0 + 1, segments)
+
+  const tx = gridX - x0
+  const tz = gridZ - z0
+
+  const index = z0 * gridResolution + x0
+  const indexX1 = z0 * gridResolution + x1
+  const indexZ1 = z1 * gridResolution + x0
+  const indexDiag = z1 * gridResolution + x1
+
+  const h00 = heights[index]
+  const h10 = heights[indexX1]
+  const h01 = heights[indexZ1]
+  const h11 = heights[indexDiag]
+
+  const hx0 = h00 * (1 - tx) + h10 * tx
+  const hx1 = h01 * (1 - tx) + h11 * tx
+
+  return hx0 * (1 - tz) + hx1 * tz
 }
 
 const WinterWorld = forwardRef(function WinterWorld({ size = 420, segments = 180, amplitude = 16, snowColorStops, ...props }, ref) {
@@ -73,6 +136,9 @@ const WinterWorld = forwardRef(function WinterWorld({ size = 420, segments = 180
 
   useImperativeHandle(ref, () => ({
     geometry: terrain.geometry,
+    plateauHeight: terrain.plateauHeight,
+    plateauRadius: terrain.plateauRadius,
+    getHeightAt: (x, z) => sampleHeight(terrain, x, z),
   }))
 
   return (
