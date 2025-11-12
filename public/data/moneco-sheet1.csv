@@ -1,0 +1,10 @@
+id,name,category,subCategory,description,website,twitter,tvlUsd,users24h,status
+dapp-bridge,Monad Bridge,Infrastructure,Cross-chain,"Permissionless bridge to move assets between Monad and other chains.",https://bridge.monad.xyz,https://twitter.com/monad_xyz,48000000,1320,live
+dapp-dex,MonadSwap,DeFi,DEX,"AMM with concentrated liquidity and deep TVL for stables and volatile pairs.",https://swap.monad.xyz,https://twitter.com/monadswap,152000000,21450,live
+dapp-money,MonLend,DeFi,Lending,"Lending market with isolated pools and AI-driven risk engine.",https://lend.monad.xyz,https://twitter.com/monlendfi,87000000,9830,live
+dapp-nft,AuroraForge,NFT,Gaming,"Mint and trade dynamic in-game assets tied to world events in Aurora Valley.",https://auroraforge.monad.xyz,https://twitter.com/auroraforge,6700000,5430,live
+dapp-social,WaveCast,Social,Creator,"Short-form social audio platform with programmable royalty splits.",https://wavecast.monad.xyz,https://twitter.com/wavecast_xyz,2100000,32800,live
+dapp-payment,GlacierPay,Payments,Commerce,"Checkout rails for Monad USDC with fiat off-ramps and loyalty NFTs.",https://glacierpay.monad.xyz,https://twitter.com/glacierpay,5600000,8700,beta
+dapp-tool,NodePilot,Infrastructure,DevTool,"One-click validator management and monitoring suite.",https://nodepilot.monad.xyz,https://twitter.com/nodepilot,0,1200,live
+dapp-game,SledSaga,Game,NFT,"Multiplayer sledding quests where players earn charms redeemable across partners.",https://sledsaga.monad.xyz,https://twitter.com/sledsaga,1500000,2600,alpha
+

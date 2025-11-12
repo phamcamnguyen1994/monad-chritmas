@@ -1,9 +1,10 @@
 import { useMemo } from 'react'
 import { useQuestStore } from '../store/questStore'
-import dapps from '../data/dappsData'
+import { useDappData } from '../hooks/useDappData.jsx'
 import { TERRAIN_HALF } from './WinterWorld'
 
 export default function MiniMap() {
+  const { dapps } = useDappData()
   const { discovered, placements, player } = useQuestStore((state) => ({
     discovered: state.discoveredDapps,
     placements: state.dappPlacements,
@@ -26,7 +27,7 @@ export default function MiniMap() {
         }
       })
       .filter(Boolean)
-  }, [placements, discovered])
+  }, [placements, discovered, dapps])
 
   const playerMarker = useMemo(() => {
     if (typeof player?.x !== 'number' || typeof player?.z !== 'number') return null

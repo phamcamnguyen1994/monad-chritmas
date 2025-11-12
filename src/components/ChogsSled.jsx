@@ -50,6 +50,9 @@ if (typeof window !== 'undefined') {
 export default function ChogsSled({ onReady, getGroundHeight, orientationRef }) {
   const ref = useRef()
   const hasLoggedRef = useRef(false)
+  const orientationWarnedRef = useRef(false)
+  const rotationWarnedRef = useRef(false)
+  const bodyYawWarnedRef = useRef(false)
   const { world } = useRapier()
   const addDistance = useQuestStore((state) => state.addDistance)
   const prevPositionRef = useRef(new THREE.Vector3())
@@ -97,16 +100,18 @@ export default function ChogsSled({ onReady, getGroundHeight, orientationRef }) 
 
     if (!hasLoggedRef.current) {
       hasLoggedRef.current = true
-      console.log('[ChogsSled] useFrame start', {
-        orientationRefReady: Boolean(orientationRef?.current),
-      })
     }
 
     let yaw = 0
     if (orientationRef?.current) {
       if (!Number.isFinite(orientationRef.current.yaw)) {
-        console.warn('[ChogsSled] orientation yaw invalid; resetting', orientationRef.current.yaw)
+        if (!orientationWarnedRef.current) {
+          console.warn('[ChogsSled] orientation yaw invalid; resetting', orientationRef.current.yaw)
+          orientationWarnedRef.current = true
+        }
         orientationRef.current.yaw = 0
+      } else {
+        orientationWarnedRef.current = false
       }
       if (keyStates.turn !== 0) {
         orientationRef.current.yaw = THREE.MathUtils.euclideanModulo(
@@ -121,17 +126,27 @@ export default function ChogsSled({ onReady, getGroundHeight, orientationRef }) 
           !Number.isFinite(rawRotation?.z) ||
           !Number.isFinite(rawRotation?.w)
         if (rotationInvalid) {
-          console.warn('[ChogsSled] body rotation invalid; resetting', rawRotation)
+          if (!rotationWarnedRef.current) {
+            console.warn('[ChogsSled] body rotation invalid; resetting', rawRotation)
+            rotationWarnedRef.current = true
+          }
           body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        } else {
+          rotationWarnedRef.current = false
         }
         const safeRotation = body.rotation()
         let bodyYaw = new THREE.Euler().setFromQuaternion(safeRotation, 'YXZ').y
         if (!Number.isFinite(bodyYaw)) {
-          console.warn('[ChogsSled] computed bodyYaw invalid; falling back to orientation yaw', {
-            safeRotation,
-            bodyYaw,
-          })
+          if (!bodyYawWarnedRef.current) {
+            console.warn('[ChogsSled] computed bodyYaw invalid; falling back to orientation yaw', {
+              safeRotation,
+              bodyYaw,
+            })
+            bodyYawWarnedRef.current = true
+          }
           bodyYaw = orientationRef.current.yaw
+        } else {
+          bodyYawWarnedRef.current = false
         }
         const yawDiff = shortestAngleDifference(bodyYaw, orientationRef.current.yaw)
         const damping = 1 - Math.pow(0.02, delta * KEY_TURN_DAMPING)

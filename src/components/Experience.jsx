@@ -5,10 +5,10 @@ import ChogsSled from './ChogsSled'
 import GiftBox from './GiftBox'
 import DiscoveredDapps from './DiscoveredDapps'
 import { useQuestStore } from '../store/questStore'
-import dapps from '../data/dappsData'
 import * as THREE from 'three'
 import { useSledInput } from './SledInputContext.jsx'
-import { shaderMaterial } from '@react-three/drei'
+import { Html, shaderMaterial } from '@react-three/drei'
+import { useDappData } from '../hooks/useDappData.jsx'
 import alea from 'alea'
 
 const HEAD_HEIGHT = 1.45
@@ -577,6 +577,144 @@ function WildlifeManager({ terrainInfo, worldSeed }) {
     </group>
   )
 }
+
+function DappHintCard({ dapp, position, trending }) {
+  return (
+    <Html
+      position={position}
+      center
+      distanceFactor={22}
+      transform
+      style={{
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          minWidth: 120,
+          padding: '6px 10px',
+          borderRadius: 10,
+          background: trending ? 'rgba(250, 204, 21, 0.82)' : 'rgba(30, 64, 175, 0.78)',
+          color: trending ? '#1f2937' : '#e0f2ff',
+          fontSize: 12,
+          lineHeight: 1.4,
+          boxShadow: '0 8px 16px rgba(8, 15, 30, 0.45)',
+          backdropFilter: 'blur(4px)',
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>{dapp.name}</div>
+        <div style={{ opacity: 0.8 }}>{dapp.category}</div>
+      </div>
+    </Html>
+  )
+}
+
+function SnowTreeVisual({ collected, variant = 0 }) {
+  const scale = collected ? 0.2 : 1
+  const hueShift = variant * 0.05
+  const foliageColor = new THREE.Color().setHSL(0.38 - hueShift, 0.42, 0.36 + hueShift * 0.3)
+  return (
+    <group scale={scale}>
+      <mesh position={[0, 0.45, 0]}>
+        <cylinderGeometry args={[0.12, 0.12, 0.9, 6]} />
+        <meshStandardMaterial color="#3b2f1e" />
+      </mesh>
+      <mesh position={[0, 1.0, 0]}>
+        <coneGeometry args={[0.9, 1.2, 9]} />
+        <meshStandardMaterial color={foliageColor} roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 1.6, 0]} scale={[0.75, 0.75, 0.75]}>
+        <coneGeometry args={[0.7, 1.1, 8]} />
+        <meshStandardMaterial color={foliageColor.clone().offsetHSL(0, 0.05, 0.1)} roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 2.1, 0]} scale={[0.55, 0.55, 0.55]}>
+        <coneGeometry args={[0.6, 0.9, 7]} />
+        <meshStandardMaterial color={foliageColor.clone().offsetHSL(-0.03, 0.02, 0.08)} roughness={0.55} />
+      </mesh>
+      <mesh position={[0, 2.6, 0]}>
+        <sphereGeometry args={[0.12, 12, 12]} />
+        <meshStandardMaterial emissive="#fde047" emissiveIntensity={0.9} color="#fef9c3" />
+      </mesh>
+    </group>
+  )
+}
+
+function StaticAnimal({ type, collected }) {
+  const groupRef = useRef()
+  useFrame((_, delta) => {
+    if (!groupRef.current) return
+    const t = performance.now() * 0.001
+    const wobble = Math.sin(t * 2.3) * 0.08
+    groupRef.current.position.y = collected ? -0.4 : wobble
+  })
+  if (type === 'fox') {
+    const tailRef = useRef()
+    return (
+      <group ref={groupRef} scale={0.55}>
+        <FoxModel tailRef={tailRef} />
+      </group>
+    )
+  }
+  const leftWingRef = useRef()
+  const rightWingRef = useRef()
+  return (
+    <group ref={groupRef} scale={0.55}>
+      <PenguinModel leftWingRef={leftWingRef} rightWingRef={rightWingRef} />
+    </group>
+  )
+}
+
+function DappMarker({ entry }) {
+  const { dapp, position, hint, trending, representation = 'gift', animalKind, treeVariant } = entry
+  const baseColor = trending ? '#fcd34d' : '#60a5fa'
+  const [collected, setCollected] = useState(false)
+  const playerPos = useQuestStore((state) => state.playerPosition)
+  const distance = useMemo(() => {
+    if (!playerPos) return Infinity
+    const dx = (playerPos.x ?? 0) - position[0]
+    const dz = (playerPos.z ?? 0) - position[2]
+    return Math.sqrt(dx * dx + dz * dz)
+  }, [playerPos, position])
+  const showHint = !collected && distance < (trending ? 20 : 14)
+  const glowIntensity = !collected ? (showHint ? (trending ? 1.3 : 0.9) : 0.2) : 0
+
+  const renderVisual = useMemo(() => {
+    if (representation === 'tree') {
+      return ({ collected: innerCollected }) => <SnowTreeVisual collected={innerCollected} variant={treeVariant} />
+    }
+    if (representation === 'animal') {
+      const animalType = animalKind ?? 'penguin'
+      return ({ collected: innerCollected }) => <StaticAnimal type={animalType} collected={innerCollected} />
+    }
+    return null
+  }, [representation, treeVariant, animalKind])
+
+  return (
+    <group>
+      <GiftBox
+        dapp={dapp}
+        position={position}
+        renderVisual={renderVisual || undefined}
+        onCollected={() => setCollected(true)}
+      />
+      {!collected ? (
+        <mesh position={[position[0], position[1] + (representation === 'gift' ? 0.8 : 1.2), position[2]]}>
+          <sphereGeometry args={[trending ? 0.35 : 0.25, 16, 16]} />
+          <meshStandardMaterial emissive={baseColor} emissiveIntensity={glowIntensity} color={baseColor} />
+        </mesh>
+      ) : null}
+      {hint && showHint ? (
+        <>
+          <mesh position={[hint[0], hint[1] - 0.3, hint[2]]} rotation={[-Math.PI / 2, 0, 0]}>
+            <coneGeometry args={[0.18, 0.4, 8]} />
+            <meshStandardMaterial color={baseColor} emissive={baseColor} emissiveIntensity={0.4} />
+          </mesh>
+          <DappHintCard dapp={dapp} position={[hint[0], hint[1], hint[2]]} trending={trending} />
+        </>
+      ) : null}
+    </group>
+  )
+}
 function SledPositionReporter({ body }) {
   const setPlayerPosition = useQuestStore((state) => state.setPlayerPosition)
   const setPlayerSpeed = useQuestStore((state) => state.setPlayerSpeed)
@@ -607,6 +745,7 @@ export default function Experience() {
   const [terrainInfo, setTerrainInfo] = useState(null)
   const { orientationRef } = useSledInput()
   const debugAxes = useMemo(() => (import.meta?.env?.DEV ? new THREE.AxesHelper(2) : null), [])
+  const { dapps, categories, trending, loading: dappsLoading, error: dappError } = useDappData()
   const atmosphere = useMemo(() => {
     if (!worldSeed) return null
     const rng = alea(`${worldSeed}-atmo`)
@@ -666,29 +805,145 @@ export default function Experience() {
   }, [sledBody, orientationRef])
 
   const giftBoxPositions = useMemo(() => {
-    if (!terrainInfo?.getHeightAt || !worldSeed) return []
+    if (!terrainInfo?.getHeightAt || !worldSeed || !dapps.length) return []
     const sampler = terrainInfo.getHeightAt
     const rng = alea(`${worldSeed}-gifts`)
     const placements = []
-    const usableRadius = TERRAIN_HALF * 0.88
+    const trendingSet = new Set((trending ?? []).map((item) => item.id))
 
-    dapps.forEach((dapp, index) => {
-      let position = [0, 4, 0]
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        const angle = rng() * Math.PI * 2
-        const radius = Math.sqrt(rng()) * usableRadius
+    const minDistanceSq = (pointA, pointB) => {
+      const dx = pointA[0] - pointB[0]
+      const dz = pointA[2] - pointB[2]
+      return dx * dx + dz * dz
+    }
+
+    const placeDapp = (dapp, options = {}) => {
+      const {
+        radiusMin = 8,
+        radiusMax = TERRAIN_HALF * 0.86,
+        baseAngle = rng() * Math.PI * 2,
+        angleSpread = Math.PI,
+        minSpacing = trendingSet.has(dapp.id) ? 11 : 6 + rng() * 2,
+      } = options
+      let position = null
+      const maxAttempts = 40
+      const minSpacingSq = minSpacing * minSpacing
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const radius = radiusMin + rng() * (radiusMax - radiusMin)
+        const angle = baseAngle + (rng() - 0.5) * angleSpread
         const x = Math.cos(angle) * radius
         const z = Math.sin(angle) * radius
         const groundHeight = sampler(x, z)
         if (groundHeight != null) {
           position = [x, groundHeight + 0.95, z]
+          const tooClose = placements.some((entry) => {
+            return minDistanceSq(entry.position, position) < minSpacingSq
+          })
+          if (tooClose) {
+            position = null
+            continue
+          }
+          const hintDistance = 2 + rng() * 1.5
+          const hintAngle = angle + (rng() - 0.5) * 0.6
+          const hint = [x + Math.cos(hintAngle) * hintDistance, groundHeight + 0.6, z + Math.sin(hintAngle) * hintDistance]
+          const isTrending = trendingSet.has(dapp.id)
+          const representation = isTrending
+            ? 'gift'
+            : rng() < 0.3
+            ? 'animal'
+            : rng() < 0.55
+            ? 'tree'
+            : 'gift'
+          const animalKind = representation === 'animal' ? (rng() > 0.5 ? 'fox' : 'penguin') : null
+          const treeVariant = representation === 'tree' ? rng() : null
+          placements.push({
+            dapp,
+            position,
+            hint,
+            zone: dapp.category,
+            trending: isTrending,
+            representation,
+            animalKind,
+            treeVariant,
+          })
           break
         }
       }
-      placements.push({ dapp, position })
+      if (!position) {
+        const fallbackAttempts = 80
+        for (let attempt = 0; attempt < fallbackAttempts; attempt += 1) {
+          const radius = 6 + rng() * (TERRAIN_HALF * 0.9 - 6)
+          const angle = rng() * Math.PI * 2
+          const x = Math.cos(angle) * radius
+          const z = Math.sin(angle) * radius
+          const groundHeight = sampler(x, z)
+          if (groundHeight == null) continue
+          const candidate = [x, groundHeight + 0.95, z]
+          const tooClose = placements.some((entry) => minDistanceSq(entry.position, candidate) < (minSpacing * 0.6) ** 2)
+          if (tooClose) continue
+          const hintDistance = 1.5 + rng() * 1.2
+          const hintAngle = angle + (rng() - 0.5) * 0.8
+          const hint = [x + Math.cos(hintAngle) * hintDistance, groundHeight + 0.6, z + Math.sin(hintAngle) * hintDistance]
+          const isTrending = trendingSet.has(dapp.id)
+          const representation = isTrending
+            ? 'gift'
+            : rng() < 0.3
+            ? 'animal'
+            : rng() < 0.6
+            ? 'tree'
+            : 'gift'
+          const animalKind = representation === 'animal' ? (rng() > 0.5 ? 'fox' : 'penguin') : null
+          const treeVariant = representation === 'tree' ? rng() : null
+          placements.push({
+            dapp,
+            position: candidate,
+            hint,
+            zone: dapp.category,
+            trending: isTrending,
+            representation,
+            animalKind,
+            treeVariant,
+          })
+          position = candidate
+          break
+        }
+      }
+    }
+
+    // Trending dapps near trung tâm
+    const trendingList = trending ?? []
+    trendingList.forEach((dapp, index) => {
+      placeDapp(dapp, {
+        radiusMin: 8 + index * 2,
+        radiusMax: 24 + index * 2,
+        angleSpread: Math.PI / 3,
+        minSpacing: 12,
+      })
     })
+
+    const otherDapps = dapps.filter((dapp) => !trendingSet.has(dapp.id))
+    // shuffle
+    for (let i = otherDapps.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(rng() * (i + 1))
+      ;[otherDapps[i], otherDapps[j]] = [otherDapps[j], otherDapps[i]]
+    }
+
+    const innerRadius = TERRAIN_HALF * 0.25
+    const outerRadius = TERRAIN_HALF * 0.86
+
+    otherDapps.forEach((dapp, index) => {
+      const ring = Math.floor(index / 40)
+      const radiusMin = Math.min(innerRadius + ring * 8, outerRadius - 6)
+      const radiusMax = Math.min(radiusMin + 20, outerRadius)
+      placeDapp(dapp, {
+        radiusMin,
+        radiusMax,
+        angleSpread: Math.PI,
+      })
+    })
+
     return placements
-  }, [terrainInfo])
+  }, [terrainInfo, dapps, worldSeed, trending, categories])
 
   useEffect(() => {
     if (!giftBoxPositions.length) return
@@ -724,8 +979,8 @@ export default function Experience() {
           </>
         ) : null}
         <WildlifeManager terrainInfo={terrainInfo} worldSeed={worldSeed} />
-        {giftBoxPositions.map(({ dapp, position }) => (
-          <GiftBox key={dapp.id} dapp={dapp} position={position} />
+        {giftBoxPositions.map((entry) => (
+          <DappMarker key={entry.dapp.id} entry={entry} />
         ))}
         <DiscoveredDapps
           dapps={dapps.filter((dapp) => discoveredDapps.includes(dapp.id))}

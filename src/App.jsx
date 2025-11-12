@@ -6,23 +6,26 @@ import MiniMap from './components/MiniMap'
 import DappOverlay from './components/DappOverlay'
 import GameplayHUD from './components/GameplayHUD.jsx'
 import AmbientAudio from './components/AmbientAudio.jsx'
+import { DappDataProvider } from './hooks/useDappData.jsx'
 import { SledInputProvider, useSledInput } from './components/SledInputContext.jsx'
 import './styles/index.css'
 
 function App() {
   return (
     <SledInputProvider>
-      <PointerCapture>
-        <Canvas camera={{ position: [0, 10, 18], fov: 55 }}>
-          <Physics gravity={[0, -9.81, 0]}>
-            <Experience />
-          </Physics>
-        </Canvas>
-        <MiniMap />
-        <DappOverlay />
-        <GameplayHUD />
-        <AmbientAudio />
-      </PointerCapture>
+      <DappDataProvider>
+        <PointerCapture>
+          <Canvas camera={{ position: [0, 10, 18], fov: 55 }}>
+            <Physics gravity={[0, -9.81, 0]}>
+              <Experience />
+            </Physics>
+          </Canvas>
+          <MiniMap />
+          <DappOverlay />
+          <GameplayHUD />
+          <AmbientAudio />
+        </PointerCapture>
+      </DappDataProvider>
     </SledInputProvider>
   )
 }

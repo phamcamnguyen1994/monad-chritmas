@@ -13,7 +13,7 @@ const GIFT_VARIANTS = [
   '/models/gift4.glb',
 ]
 
-export default function GiftBox({ dapp, position }) {
+export default function GiftBox({ dapp, position, renderVisual, onCollected }) {
   const [collected, setCollected] = useState(false)
   const collectDapp = useQuestStore((state) => state.collectDapp)
   const variantIndex = useMemo(() => Math.floor(Math.random() * GIFT_VARIANTS.length), [])
@@ -24,6 +24,7 @@ export default function GiftBox({ dapp, position }) {
   const giftScenes = useMemo(() => [gift1, gift2, gift3, gift4], [gift1, gift2, gift3, gift4])
   const model = giftScenes[variantIndex]
   const scene = useMemo(() => {
+    if (renderVisual) return null
     const cloned = clone(model.scene)
     cloned.traverse((child) => {
       if (child.isMesh) {
@@ -37,9 +38,9 @@ export default function GiftBox({ dapp, position }) {
       }
     })
     return cloned
-  }, [model, variantIndex])
+  }, [model, variantIndex, renderVisual])
 
-  if (collected) return null
+  if (collected && !renderVisual) return null
 
   return (
     <RigidBody type="fixed" position={position} colliders={false}>
@@ -50,9 +51,10 @@ export default function GiftBox({ dapp, position }) {
           collectDapp(dapp.id, dapp.category)
           setCollected(true)
           playGiftChime()
+          onCollected?.(dapp)
         }}
       />
-      <primitive object={scene} />
+      {renderVisual ? renderVisual({ collected }) : <primitive object={scene} />}
     </RigidBody>
   )
 }

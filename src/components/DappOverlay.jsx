@@ -1,23 +1,34 @@
+import { useMemo } from 'react'
 import { useQuestStore } from '../store/questStore'
-import dapps from '../data/dappsData'
+import { useDappData } from '../hooks/useDappData.jsx'
 
 export default function DappOverlay() {
   const activeDapp = useQuestStore((state) => state.activeDapp)
   const closeActiveDapp = useQuestStore((state) => state.closeActiveDapp)
-  if (!activeDapp) return null
-  const dapp = dapps.find((item) => item.id === activeDapp)
+  const { dapps, categories } = useDappData()
+  const dapp = useMemo(
+    () => (activeDapp ? dapps.find((item) => item.id === activeDapp) ?? null : null),
+    [activeDapp, dapps]
+  )
 
-  if (!dapp) return null
+  const related = useMemo(() => {
+    if (!dapp) return []
+    const category = categories.find((cat) => cat.id === dapp.category)
+    if (!category?.items) return []
+    return category.items.filter((item) => item.id !== dapp.id).slice(0, 3)
+  }, [dapp, categories])
 
-  const handleVote = () => {
-    if (dapp.voteUrl) {
-      window.open(dapp.voteUrl, '_blank', 'noopener,noreferrer')
+  if (!activeDapp || !dapp) return null
+
+  const handleVisit = () => {
+    if (dapp.website) {
+      window.open(dapp.website, '_blank', 'noopener,noreferrer')
     }
   }
 
-  const handleCollect = () => {
-    if (dapp.collectUrl) {
-      window.open(dapp.collectUrl, '_blank', 'noopener,noreferrer')
+  const handleTwitter = () => {
+    if (dapp.twitter) {
+      window.open(dapp.twitter, '_blank', 'noopener,noreferrer')
     }
   }
 
@@ -37,18 +48,30 @@ export default function DappOverlay() {
         <p className="overlay-description">{dapp.description}</p>
 
         <div className="overlay-actions">
-          <button type="button" onClick={handleVote} className="overlay-action vote">
-            Vote trên Farcaster
+          <button type="button" onClick={handleVisit} className="overlay-action vote">
+            Mở website
           </button>
-          <button type="button" onClick={handleCollect} className="overlay-action collect">
-            Collect NFT
+          <button type="button" onClick={handleTwitter} className="overlay-action collect">
+            Twitter
           </button>
         </div>
 
         <div className="overlay-meta">
-          <span>TVL: {dapp.tvlLabel}</span>
-          <span>Users: {dapp.userLabel}</span>
+          <span>TVL: {dapp.tvlUsd ? `$${(dapp.tvlUsd / 1_000_000).toFixed(1)}M` : 'N/A'}</span>
+          <span>Users 24h: {dapp.users24h ? dapp.users24h.toLocaleString() : 'N/A'}</span>
+          <span>Trạng thái: {dapp.status}</span>
         </div>
+
+        {related.length ? (
+          <div className="overlay-related">
+            <h3>Gợi ý tiếp theo</h3>
+            <ul>
+              {related.map((item) => (
+                <li key={item.id}>{item.name}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     </div>
   )
