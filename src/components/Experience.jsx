@@ -7,7 +7,7 @@ import DiscoveredDapps from './DiscoveredDapps'
 import { useQuestStore } from '../store/questStore'
 import * as THREE from 'three'
 import { useSledInput } from './SledInputContext.jsx'
-import { Html, shaderMaterial } from '@react-three/drei'
+import { Html, shaderMaterial, Billboard } from '@react-three/drei'
 import { useDappData } from '../hooks/useDappData.jsx'
 import alea from 'alea'
 
@@ -103,6 +103,34 @@ function createDeterministicRandom(seed) {
     h ^= h >>> 16
     return (h >>> 0) / 4294967296
   }
+}
+
+function useLogoTexture(url) {
+  const [texture, setTexture] = useState(null)
+  useEffect(() => {
+    if (!url) {
+      setTexture(null)
+      return
+    }
+    let mounted = true
+    const loader = new THREE.TextureLoader()
+    loader.setCrossOrigin('anonymous')
+    loader.load(
+      url,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace
+        if (mounted) setTexture(tex)
+      },
+      undefined,
+      () => {
+        if (mounted) setTexture(null)
+      }
+    )
+    return () => {
+      mounted = false
+    }
+  }, [url])
+  return texture
 }
 
 function FirstPersonCamera({ body }) {
@@ -578,37 +606,6 @@ function WildlifeManager({ terrainInfo, worldSeed }) {
   )
 }
 
-function DappHintCard({ dapp, position, trending }) {
-  return (
-    <Html
-      position={position}
-      center
-      distanceFactor={22}
-      transform
-      style={{
-        pointerEvents: 'none',
-      }}
-    >
-      <div
-        style={{
-          minWidth: 120,
-          padding: '6px 10px',
-          borderRadius: 10,
-          background: trending ? 'rgba(250, 204, 21, 0.82)' : 'rgba(30, 64, 175, 0.78)',
-          color: trending ? '#1f2937' : '#e0f2ff',
-          fontSize: 12,
-          lineHeight: 1.4,
-          boxShadow: '0 8px 16px rgba(8, 15, 30, 0.45)',
-          backdropFilter: 'blur(4px)',
-        }}
-      >
-        <div style={{ fontWeight: 600 }}>{dapp.name}</div>
-        <div style={{ opacity: 0.8 }}>{dapp.category}</div>
-      </div>
-    </Html>
-  )
-}
-
 function SnowTreeVisual({ collected, variant = 0 }) {
   const scale = collected ? 0.2 : 1
   const hueShift = variant * 0.05
@@ -677,6 +674,7 @@ function DappMarker({ entry }) {
   }, [playerPos, position])
   const showHint = !collected && distance < (trending ? 20 : 14)
   const glowIntensity = !collected ? (showHint ? (trending ? 1.3 : 0.9) : 0.2) : 0
+  const logoTexture = useLogoTexture(dapp.logo)
 
   const renderVisual = useMemo(() => {
     if (representation === 'tree') {
@@ -709,7 +707,45 @@ function DappMarker({ entry }) {
             <coneGeometry args={[0.18, 0.4, 8]} />
             <meshStandardMaterial color={baseColor} emissive={baseColor} emissiveIntensity={0.4} />
           </mesh>
-          <DappHintCard dapp={dapp} position={[hint[0], hint[1], hint[2]]} trending={trending} />
+          {logoTexture ? (
+            <Billboard position={[hint[0], hint[1] + 0.6, hint[2]]} follow={true} lockZ={false}>
+              <mesh>
+                <planeGeometry args={[1.4, 1.4]} />
+                <meshBasicMaterial
+                  map={logoTexture}
+                  transparent
+                  depthWrite={false}
+                  toneMapped={false}
+                  side={THREE.FrontSide}
+                />
+              </mesh>
+            </Billboard>
+          ) : (
+            <Html
+              position={[hint[0], hint[1] + 0.6, hint[2]]}
+              center
+              distanceFactor={24}
+              transform
+              style={{ pointerEvents: 'none', opacity: 0.92 }}
+            >
+              <div
+                style={{
+                  minWidth: 120,
+                  padding: '6px 10px',
+                  borderRadius: 10,
+                  background: trending ? 'rgba(250, 204, 21, 0.82)' : 'rgba(30, 64, 175, 0.78)',
+                  color: trending ? '#1f2937' : '#e0f2ff',
+                  fontSize: 12,
+                  lineHeight: 1.4,
+                  boxShadow: '0 8px 16px rgba(8, 15, 30, 0.45)',
+                  backdropFilter: 'blur(4px)',
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>{dapp.name}</div>
+                <div style={{ opacity: 0.8 }}>{dapp.category}</div>
+              </div>
+            </Html>
+          )}
         </>
       ) : null}
     </group>
@@ -931,8 +967,12 @@ export default function Experience() {
     const innerRadius = TERRAIN_HALF * 0.25
     const outerRadius = TERRAIN_HALF * 0.86
 
-    otherDapps.forEach((dapp, index) => {
-      const ring = Math.floor(index / 40)
+    let placedCount = 0
+    otherDapps.forEach((dapp) => {
+      if (rng() > 0.5) {
+        return
+      }
+      const ring = Math.floor(placedCount / 40)
       const radiusMin = Math.min(innerRadius + ring * 8, outerRadius - 6)
       const radiusMax = Math.min(radiusMin + 20, outerRadius)
       placeDapp(dapp, {
@@ -940,6 +980,7 @@ export default function Experience() {
         radiusMax,
         angleSpread: Math.PI,
       })
+      placedCount += 1
     })
 
     return placements

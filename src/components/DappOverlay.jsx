@@ -32,9 +32,29 @@ export default function DappOverlay() {
     }
   }
 
+  const handleOverlayPointerDown = (event) => {
+    event.stopPropagation()
+  }
+
+  const handleOverlayPointerUp = (event) => {
+    event.stopPropagation()
+  }
+
+  const handleBackdropClick = (event) => {
+    if (event.target === event.currentTarget) {
+      closeActiveDapp()
+    }
+  }
+
   return (
-    <div className="overlay-root">
-      <div className="overlay-card">
+    <div
+      className="overlay-root"
+      onPointerDown={handleOverlayPointerDown}
+      onPointerUp={handleOverlayPointerUp}
+      onPointerMove={handleOverlayPointerDown}
+      onClick={handleBackdropClick}
+    >
+      <div className="overlay-card" onPointerDown={handleOverlayPointerDown} onPointerUp={handleOverlayPointerUp}>
         <header className="overlay-header">
           <div>
             <p className="overlay-subtitle">{dapp.category}</p>
