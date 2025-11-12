@@ -1,238 +1,280 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { useBox } from '@react-three/cannon'
-import { useKeyboardControls } from '@react-three/drei'
+import { RigidBody, useRapier } from '@react-three/rapier'
 import * as THREE from 'three'
+import { useGLTF } from '@react-three/drei'
+import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { useQuestStore } from '../store/questStore'
 
-const forwardVector = new THREE.Vector3()
-const sideVector = new THREE.Vector3()
-const dampingForce = new THREE.Vector3()
-const tempVec = new THREE.Vector3()
-const upVector = new THREE.Vector3(0, 1, 0)
-const quat = new THREE.Quaternion()
-const euler = new THREE.Euler()
+const FWD_FORCE = 26
+const KEY_TURN_RATE = 2.2
+const KEY_TURN_DAMPING = 9.5
+const DOWNHILL_BOOST = 12
+const DRAG = 0.99
+const MAX_SPEED = 22
+const SLED_MODEL_PATH = '/models/chog-sled.glb'
 
-const VISUAL_OFFSET_Y = 0.25
-const COLLIDER_HALF_HEIGHT = 0.25
+const wrapAngle = (angle) => THREE.MathUtils.euclideanModulo(angle + Math.PI, Math.PI * 2) - Math.PI
+const shortestAngleDifference = (target, current) => wrapAngle(target - current)
 
-const ChogsSled = forwardRef(function ChogsSled(
-  {
-    position = [0, 8, 0],
-    enabled = true,
-    acceleration = 40,
-    downhillAssist = 14,
-    turnStrength = 18,
-    brakeStrength = 24,
-    maxSpeed = 28,
-    driftDamping = 0.12,
-    onVelocityChange,
-    respawnHeight = 28,
-    getGroundHeight,
-    ...props
-  },
-  ref
-) {
-  const [, getKeys] = useKeyboardControls()
-  const velocityRef = useRef(new THREE.Vector3())
+const keyStates = {
+  w: false,
+  a: false,
+  d: false,
+  s: false,
+  shift: false,
+  turn: 0,
+}
 
-  const objectRef = useRef(null)
-
-  const [physicsRef, api] = useBox(
-    () => ({
-      args: [1.1, 0.5, 2.2],
-      mass: 4.5,
-      position,
-      angularDamping: 0.8,
-      linearDamping: driftDamping,
-      material: 'sled',
-      allowSleep: false,
-      ...props,
-    }),
-    objectRef,
-    [position, driftDamping]
-  )
-
-  useEffect(() => {
-    let spawnY = position[1]
-    if (typeof getGroundHeight === 'function') {
-      const groundHeight = getGroundHeight(position[0], position[2])
-      if (groundHeight != null) {
-        spawnY = groundHeight + COLLIDER_HALF_HEIGHT
-      }
+if (typeof window !== 'undefined') {
+  window.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase()
+    if (key in keyStates) {
+      keyStates[key] = true
+      if (key === 'a') keyStates.turn = 1
+      if (key === 'd') keyStates.turn = -1
     }
-    api.position.set(position[0], spawnY, position[2])
-    api.velocity.set(0, 0, 0)
-    api.angularVelocity.set(0, 0, 0)
-  }, [api.position, api.velocity, api.angularVelocity, position, getGroundHeight])
+  })
+  window.addEventListener('keyup', (event) => {
+    const key = event.key.toLowerCase()
+    if (key in keyStates) {
+      keyStates[key] = false
+      if (key === 'a' && !keyStates.d) keyStates.turn = 0
+      if (key === 'd' && !keyStates.a) keyStates.turn = 0
+      if (keyStates.a && !keyStates.d) keyStates.turn = 1
+      if (keyStates.d && !keyStates.a) keyStates.turn = -1
+    }
+  })
+}
 
-  useEffect(() => {
-    const lowerBound = respawnHeight - 80
-    const unsubPosition = api.position.subscribe(([x, y, z]) => {
-      if (y < lowerBound) {
-        api.position.set(x, respawnHeight, z)
-        api.velocity.set(0, 0, 0)
-        api.angularVelocity.set(0, 0, 0)
+export default function ChogsSled({ onReady, getGroundHeight, orientationRef }) {
+  const ref = useRef()
+  const hasLoggedRef = useRef(false)
+  const { world } = useRapier()
+  const addDistance = useQuestStore((state) => state.addDistance)
+  const prevPositionRef = useRef(new THREE.Vector3())
+  const sledModel = useGLTF(SLED_MODEL_PATH)
+  const movementForwardRef = useMemo(() => new THREE.Vector3(), [])
+  const movementRightRef = useMemo(() => new THREE.Vector3(), [])
+  const movementVectorRef = useMemo(() => new THREE.Vector3(), [])
+  const sledScene = useMemo(() => {
+    const enhanceMaterial = (material) => {
+      if (!material) return material
+      const clonedMaterial = material.clone()
+      if (clonedMaterial.color) clonedMaterial.color = new THREE.Color('#fdf6ba')
+      if (clonedMaterial.emissive) clonedMaterial.emissive = new THREE.Color('#fde68a')
+      if (typeof clonedMaterial.emissiveIntensity === 'number') clonedMaterial.emissiveIntensity = 0.35
+      return clonedMaterial
+    }
+
+    const cloned = clone(sledModel.scene)
+    cloned.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map((mat) => enhanceMaterial(mat))
+        } else if (child.material) {
+          child.material = enhanceMaterial(child.material)
+        }
       }
     })
-    const unsubVelocity = api.velocity.subscribe((velocity) => {
-      velocityRef.current.fromArray(velocity)
-      if (typeof onVelocityChange === 'function') {
-        onVelocityChange(velocity)
+    return cloned
+  }, [sledModel])
+
+  useEffect(() => {
+    if (!ref.current) return
+    ref.current.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    ref.current.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    const translation = ref.current.translation()
+    prevPositionRef.current.set(translation.x, translation.y, translation.z)
+    onReady?.(ref.current)
+  }, [onReady])
+
+  useFrame((_, delta) => {
+    const body = ref.current
+    if (!body) return
+
+    if (!hasLoggedRef.current) {
+      hasLoggedRef.current = true
+      console.log('[ChogsSled] useFrame start', {
+        orientationRefReady: Boolean(orientationRef?.current),
+      })
+    }
+
+    let yaw = 0
+    if (orientationRef?.current) {
+      if (!Number.isFinite(orientationRef.current.yaw)) {
+        console.warn('[ChogsSled] orientation yaw invalid; resetting', orientationRef.current.yaw)
+        orientationRef.current.yaw = 0
       }
-    })
-    return () => {
-      unsubPosition?.()
-      unsubVelocity?.()
-    }
-  }, [api.position, api.velocity, api.angularVelocity, onVelocityChange, respawnHeight])
-
-  useImperativeHandle(ref, () => ({
-    object: objectRef.current,
-    api,
-    velocity: velocityRef.current,
-    halfHeight: COLLIDER_HALF_HEIGHT,
-  }))
-
-  useFrame((state, delta) => {
-    const sled = objectRef.current
-    if (!sled || delta <= 0) return
-
-    if (!enabled) {
-      api.angularVelocity.set(0, 0, 0)
-      api.velocity.set(0, 0, 0)
-      return
-    }
-
-    const input = getKeys()
-    const forward = Number(input.forward) - Number(input.backward)
-    const steer = Number(input.right) - Number(input.left)
-    const braking = input.brake
-
-    const velocity = velocityRef.current
-    const horizontalSpeed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
-
-    sled.getWorldQuaternion(quat)
-    forwardVector.set(0, 0, -1).applyQuaternion(quat).normalize()
-    sideVector.set(1, 0, 0).applyQuaternion(quat).normalize()
-
-    let slopeFactor = 0
-
-    if (forward > 0) {
-      tempVec.copy(forwardVector).multiplyScalar(acceleration * delta)
-      api.applyImpulse(tempVec.toArray(), [0, 0, 0])
-    }
-
-    if (forward < 0) {
-      tempVec.copy(forwardVector).multiplyScalar(-acceleration * 0.5 * delta)
-      api.applyImpulse(tempVec.toArray(), [0, 0, 0])
-    }
-
-    if (braking || forward < 0) {
-      dampingForce.copy(velocity).multiplyScalar(-brakeStrength * delta)
-      api.applyImpulse(dampingForce.toArray(), [0, 0, 0])
-    }
-
-    if (horizontalSpeed < maxSpeed) {
-      const upAxis = upVector.clone().applyQuaternion(quat)
-      slopeFactor = THREE.MathUtils.clamp(1 - upAxis.y, 0, 1)
-      if (slopeFactor > 0.08) {
-        tempVec.copy(forwardVector).multiplyScalar(slopeFactor * downhillAssist * delta)
-        api.applyForce(tempVec.toArray(), [0, 0, 0])
+      if (keyStates.turn !== 0) {
+        orientationRef.current.yaw = THREE.MathUtils.euclideanModulo(
+          orientationRef.current.yaw + keyStates.turn * KEY_TURN_RATE * delta + Math.PI,
+          Math.PI * 2
+        ) - Math.PI
+      } else {
+        const rawRotation = body.rotation()
+        const rotationInvalid =
+          !Number.isFinite(rawRotation?.x) ||
+          !Number.isFinite(rawRotation?.y) ||
+          !Number.isFinite(rawRotation?.z) ||
+          !Number.isFinite(rawRotation?.w)
+        if (rotationInvalid) {
+          console.warn('[ChogsSled] body rotation invalid; resetting', rawRotation)
+          body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+        }
+        const safeRotation = body.rotation()
+        let bodyYaw = new THREE.Euler().setFromQuaternion(safeRotation, 'YXZ').y
+        if (!Number.isFinite(bodyYaw)) {
+          console.warn('[ChogsSled] computed bodyYaw invalid; falling back to orientation yaw', {
+            safeRotation,
+            bodyYaw,
+          })
+          bodyYaw = orientationRef.current.yaw
+        }
+        const yawDiff = shortestAngleDifference(bodyYaw, orientationRef.current.yaw)
+        const damping = 1 - Math.pow(0.02, delta * KEY_TURN_DAMPING)
+        orientationRef.current.yaw = THREE.MathUtils.euclideanModulo(
+          orientationRef.current.yaw + yawDiff * damping + Math.PI,
+          Math.PI * 2
+        ) - Math.PI
       }
+      yaw = orientationRef.current.yaw
+      const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0, 'YXZ'))
+      body.setRotation({ x: targetQuat.x, y: targetQuat.y, z: targetQuat.z, w: targetQuat.w }, true)
+    } else {
+      const rotation = body.rotation()
+      const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
+      yaw = new THREE.Euler().setFromQuaternion(quat, 'YXZ').y
+    }
+
+    movementForwardRef.set(Math.sin(yaw), 0, -Math.cos(yaw)).normalize()
+    movementRightRef.set(Math.cos(yaw), 0, Math.sin(yaw)).normalize()
+
+    const movementVector = movementVectorRef.set(0, 0, 0)
+    if (keyStates.w) movementVector.add(movementForwardRef)
+    if (keyStates.s) movementVector.addScaledVector(movementForwardRef, -1)
+
+    const rotation = body.rotation()
+    const bodyQuat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
+    const bodyForward = new THREE.Vector3(0, 0, -1).applyQuaternion(bodyQuat).normalize()
+    const bodyRight = new THREE.Vector3(1, 0, 0).applyQuaternion(bodyQuat).normalize()
+
+    const linvel = body.linvel()
+    let velocity = new THREE.Vector3(linvel.x, linvel.y, linvel.z)
+    let horizontalSpeed = Math.sqrt(velocity.x ** 2 + velocity.z ** 2)
+
+    if (movementVector.lengthSq() > 0) {
+      movementVector.normalize()
+      const boostMultiplier = keyStates.shift ? 1.8 : 1
+      movementVector.multiplyScalar(FWD_FORCE * boostMultiplier * delta)
+      body.applyImpulse({ x: movementVector.x, y: movementVector.y, z: movementVector.z }, true)
+    }
+
+    const translation = body.translation()
+    const currentPosition = new THREE.Vector3(translation.x, translation.y, translation.z)
+    const traveled = currentPosition.distanceTo(prevPositionRef.current)
+    if (traveled > 0.01) {
+      addDistance(traveled)
+      prevPositionRef.current.copy(currentPosition)
     }
 
     if (typeof getGroundHeight === 'function') {
-      const groundHeight = getGroundHeight(sled.position.x, sled.position.z)
+      const groundHeight = getGroundHeight(translation.x, translation.z)
       if (groundHeight != null) {
-        const minAllowedY = groundHeight + COLLIDER_HALF_HEIGHT
-        const offset = sled.position.y - minAllowedY
-        if (Math.abs(offset) > 0.001) {
-          api.position.set(sled.position.x, minAllowedY, sled.position.z)
-          velocityRef.current.set(velocity.x, 0, velocity.z)
-          api.velocity.set(velocity.x, 0, velocity.z)
-          api.angularVelocity.set(0, 0, 0)
-        } else if (velocity.y < 0) {
-          velocityRef.current.set(velocity.x, 0, velocity.z)
-          api.velocity.set(velocity.x, 0, velocity.z)
+        const targetHeight = groundHeight + 0.75
+        const newY = translation.y < targetHeight ? targetHeight : translation.y
+        if (translation.y !== newY) {
+          body.setTranslation({ x: translation.x, y: newY, z: translation.z }, true)
+          const currentVel = body.linvel()
+          if (currentVel.y < 0) {
+            body.setLinvel({ x: currentVel.x, y: 0, z: currentVel.z }, true)
+          }
+          prevPositionRef.current.set(translation.x, newY, translation.z)
         }
       }
     }
 
-    if (steer !== 0) {
-      const steerTorque = steer * turnStrength * (1 + Math.min(horizontalSpeed / 12, 1.8))
-      api.applyTorque([0, steerTorque, 0])
-    }
-
-    if (horizontalSpeed > 0.5) {
-      const lateralSpeed = sideVector.dot(velocity)
-      if (Math.abs(lateralSpeed) > 0.01) {
-        tempVec.copy(sideVector).multiplyScalar(lateralSpeed * -driftDamping)
-        api.applyImpulse(tempVec.toArray(), [0, 0, 0])
+    if (horizontalSpeed < MAX_SPEED) {
+      const ray = world.castRay(
+        {
+          origin: body.translation(),
+          dir: { x: 0, y: -1, z: 0 },
+          maxToi: 3,
+        },
+        true
+      )
+      if (ray && ray.toi < 1) {
+        const downhill = bodyForward.y < -0.15
+        if (downhill) {
+          const downhillImpulse = bodyForward.clone().setY(0).normalize().multiplyScalar(DOWNHILL_BOOST * delta)
+          body.applyImpulse(downhillImpulse, true)
+        }
       }
     }
 
-    if (horizontalSpeed > maxSpeed) {
-      const clampFactor = 1 - maxSpeed / horizontalSpeed
-      dampingForce.set(velocity.x, 0, velocity.z).multiplyScalar(-clampFactor * 0.6)
-      api.applyImpulse(dampingForce.toArray(), [0, 0, 0])
+    const updatedLinvel = body.linvel()
+    velocity.set(updatedLinvel.x, updatedLinvel.y, updatedLinvel.z)
+    horizontalSpeed = Math.sqrt(velocity.x ** 2 + velocity.z ** 2)
+
+    if (keyStates.w) {
+      const forwardComponent = bodyForward.dot(velocity)
+      if (forwardComponent < 0) {
+        const correction = bodyForward.clone().multiplyScalar(-forwardComponent * 0.8)
+        body.applyImpulse(correction, true)
+        const correctedVel = body.linvel()
+        velocity.set(correctedVel.x, correctedVel.y, correctedVel.z)
+        horizontalSpeed = Math.sqrt(velocity.x ** 2 + velocity.z ** 2)
+      }
     }
 
-    if (!forward && !steer && !braking && slopeFactor <= 0.05 && horizontalSpeed < 0.12) {
-      api.velocity.set(0, 0, 0)
-      api.angularVelocity.set(0, 0, 0)
+    if (keyStates.s) {
+      const forwardComponent = bodyForward.dot(velocity)
+      if (forwardComponent > 0) {
+        const correction = bodyForward.clone().multiplyScalar(-forwardComponent * 0.8)
+        body.applyImpulse(correction, true)
+        const correctedVel = body.linvel()
+        velocity.set(correctedVel.x, correctedVel.y, correctedVel.z)
+        horizontalSpeed = Math.sqrt(velocity.x ** 2 + velocity.z ** 2)
+      }
     }
 
-    const targetYaw = Math.atan2(-velocity.x, -velocity.z)
-    if (Number.isFinite(targetYaw) && horizontalSpeed > 1.2) {
-      euler.setFromQuaternion(quat, 'YXZ')
-      let yaw = euler.y
-      let deltaYaw = targetYaw - yaw
-      deltaYaw = ((deltaYaw + Math.PI) % (Math.PI * 2)) - Math.PI
-      const torque = THREE.MathUtils.clamp(deltaYaw * 12, -12, 12)
-      api.applyTorque([0, torque, 0])
+    if (horizontalSpeed > MAX_SPEED) {
+      const clampFactor = 1 - MAX_SPEED / Math.max(horizontalSpeed, 0.001)
+      const clampImpulse = velocity.clone().multiplyScalar(-clampFactor * 0.6)
+      body.applyImpulse(clampImpulse, true)
+      const clamped = body.linvel()
+      velocity.set(clamped.x, clamped.y, clamped.z)
     }
+
+    velocity.multiplyScalar(DRAG)
+    body.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true)
+
+    const lateral = bodyRight.dot(velocity)
+    if (Math.abs(lateral) > 0.01) {
+      const sidewaysCorrection = bodyRight.clone().multiplyScalar(-lateral * 0.35)
+      body.applyImpulse(sidewaysCorrection, true)
+    }
+
+    const angvel = body.angvel()
+    body.setAngvel({ x: 0, y: angvel.y * 0.6, z: 0 }, true)
   })
 
   return (
-    <group ref={physicsRef} castShadow>
-      <mesh position={[0, VISUAL_OFFSET_Y - 0.08, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.2, 0.26, 2.2]} />
-        <meshStandardMaterial color="#e2e8f0" roughness={0.35} metalness={0.28} />
-      </mesh>
-
-      <group position={[0, VISUAL_OFFSET_Y - 0.18, 0]}>
-        <mesh position={[0, 0, 0.56]} castShadow receiveShadow>
-          <cylinderGeometry args={[0.09, 0.09, 2.2, 14]} />
-          <meshStandardMaterial color="#94a3b8" roughness={0.4} metalness={0.6} />
-        </mesh>
-        <mesh position={[0, 0, -0.56]} castShadow receiveShadow>
-          <cylinderGeometry args={[0.09, 0.09, 2.2, 14]} />
-          <meshStandardMaterial color="#94a3b8" roughness={0.4} metalness={0.6} />
-        </mesh>
-      </group>
-
-      <mesh position={[0, VISUAL_OFFSET_Y + 0.28, -0.82]} rotation={[Math.PI / 1.9, 0, 0]} castShadow>
-        <torusGeometry args={[0.42, 0.06, 16, 28]} />
-        <meshStandardMaterial color="#1f2937" roughness={0.7} metalness={0.2} />
-      </mesh>
-
-      <mesh position={[0, VISUAL_OFFSET_Y + 0.18, 0]} castShadow>
-        <boxGeometry args={[0.6, 0.18, 1.2]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.6} metalness={0.18} />
-      </mesh>
-
-      <group position={[0, VISUAL_OFFSET_Y + 0.45, 0]}>
-        <mesh castShadow>
-          <sphereGeometry args={[0.42, 24, 18]} />
-          <meshStandardMaterial color="#f97316" emissive="#fb923c" emissiveIntensity={0.25} roughness={0.45} metalness={0.18} />
-        </mesh>
-        <mesh position={[0, 0.52, 0]} castShadow>
-          <sphereGeometry args={[0.32, 22, 16]} />
-          <meshStandardMaterial color="#1e293b" roughness={0.45} metalness={0.2} />
-        </mesh>
-      </group>
-    </group>
+    <RigidBody
+      ref={ref}
+      position={[0, 6, 0]}
+      mass={4}
+      colliders="cuboid"
+      linearDamping={0.18}
+      angularDamping={1.5}
+      enabledTranslations={[true, true, true]}
+      enabledRotations={[false, true, false]}
+    >
+      <primitive object={sledScene} />
+    </RigidBody>
   )
-})
+}
 
-export default ChogsSled
+useGLTF.preload(SLED_MODEL_PATH)

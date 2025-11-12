@@ -1,70 +1,129 @@
-import { useState, useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import SailingScene from './pages/SailingScene'
-import './App.css'
+import { useRef, useCallback } from 'react'
+import { Canvas } from '@react-three/fiber'
+import { Physics } from '@react-three/rapier'
+import Experience from './components/Experience'
+import MiniMap from './components/MiniMap'
+import DappOverlay from './components/DappOverlay'
+import GameplayHUD from './components/GameplayHUD.jsx'
+import { SledInputProvider, useSledInput } from './components/SledInputContext.jsx'
+import './styles/index.css'
 
-function AppShell({ children, walletConnected, walletAddress, onConnect, onDisconnect }) {
+function App() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-950 via-blue-950 to-[#05012a] overflow-hidden">
-      <main className="px-0 py-8">
-        {typeof children === 'function'
-          ? children({ walletConnected, walletAddress, onConnect, onDisconnect })
-          : children}
-      </main>
+    <SledInputProvider>
+      <PointerCapture>
+        <Canvas camera={{ position: [0, 10, 18], fov: 55 }}>
+          <fog attach="fog" args={['#0a1731', 12, 120]} />
+          <color attach="background" args={['#081633']} />
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[12, 18, 10]} intensity={1.2} castShadow />
+          <Physics gravity={[0, -9.81, 0]}>
+            <Experience />
+          </Physics>
+        </Canvas>
+        <MiniMap />
+        <DappOverlay />
+        <GameplayHUD />
+      </PointerCapture>
+    </SledInputProvider>
+  )
+}
+
+function PointerCapture({ children }) {
+  const containerRef = useRef(null)
+  const {
+    handlePointerMove,
+    handlePointerDown,
+    handlePointerUp,
+    handlePointerLeave,
+    handleWheel,
+    pointerLockSupported,
+    pointerLockActive,
+    requestPointerLock,
+    exitPointerLock,
+    isDragging,
+  } = useSledInput()
+
+  const togglePointerLock = useCallback(() => {
+    if (!pointerLockSupported) return
+    if (pointerLockActive) {
+      exitPointerLock()
+    } else if (containerRef.current) {
+      requestPointerLock(containerRef.current)
+    }
+  }, [pointerLockSupported, pointerLockActive, exitPointerLock, requestPointerLock])
+
+  const handleContextMenu = useCallback(
+    (event) => {
+      if (pointerLockActive || isDragging) {
+        event.preventDefault()
+      }
+    },
+    [pointerLockActive, isDragging]
+  )
+
+  return (
+    <div
+      ref={containerRef}
+      className="app-shell"
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
+      onPointerMove={handlePointerMove}
+      onWheel={handleWheel}
+      onDoubleClick={togglePointerLock}
+      onContextMenu={handleContextMenu}
+    >
+      {children}
+      <PointerLockOverlay
+        active={pointerLockActive}
+        supported={pointerLockSupported}
+        onToggle={togglePointerLock}
+      />
     </div>
   )
 }
 
-function App() {
-  const [walletConnected, setWalletConnected] = useState(false)
-  const [walletAddress, setWalletAddress] = useState(null)
-
-  useEffect(() => {
-    const savedAddress = localStorage.getItem('walletAddress')
-    if (savedAddress) {
-      setWalletAddress(savedAddress)
-      setWalletConnected(true)
-    }
-  }, [])
-
-  const handleConnect = (address) => {
-    setWalletAddress(address)
-    setWalletConnected(true)
-    localStorage.setItem('walletAddress', address)
-  }
-
-  const handleDisconnect = () => {
-    setWalletAddress(null)
-    setWalletConnected(false)
-    localStorage.removeItem('walletAddress')
-  }
-
+function PointerLockOverlay({ active, supported, onToggle }) {
+  if (!supported) return null
   return (
-    <Router>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <AppShell
-              walletConnected={walletConnected}
-              walletAddress={walletAddress}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-            >
-              {({ walletConnected: wc, walletAddress: wa, onConnect, onDisconnect }) => (
-                <SailingScene
-                  walletConnected={wc}
-                  walletAddress={wa}
-                  onConnect={onConnect}
-                  onDisconnect={onDisconnect}
-                />
-              )}
-            </AppShell>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+    <div
+      style={{
+        position: 'absolute',
+        right: 16,
+        bottom: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        alignItems: 'flex-end',
+        pointerEvents: 'none',
+        color: 'rgba(255,255,255,0.82)',
+        fontSize: 13,
+        textAlign: 'right',
+      }}
+    >
+      <button
+        type="button"
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onToggle()
+        }}
+        style={{
+          pointerEvents: 'auto',
+          background: active ? 'rgba(0, 128, 255, 0.8)' : 'rgba(0,0,0,0.55)',
+          border: '1px solid rgba(255,255,255,0.25)',
+          borderRadius: 6,
+          padding: '6px 12px',
+          color: '#fff',
+          cursor: 'pointer',
+          fontSize: 13,
+        }}
+      >
+        {active ? 'Unlock cursor (Esc)' : 'Enable mouse look (L / double-click)'}
+      </button>
+      <span style={{ opacity: 0.8 }}>Drag or touch to look around · Enable mouse look for full control</span>
+    </div>
   )
 }
 
