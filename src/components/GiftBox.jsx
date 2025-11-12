@@ -3,6 +3,7 @@ import { CuboidCollider, RigidBody } from '@react-three/rapier'
 import { useGLTF } from '@react-three/drei'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { useQuestStore } from '../store/questStore'
+import { playGiftChime } from './AmbientAudio.jsx'
 
 const BOX_SIZE = 1.1
 const GIFT_VARIANTS = [
@@ -48,6 +49,7 @@ export default function GiftBox({ dapp, position }) {
         onIntersectionEnter={() => {
           collectDapp(dapp.id, dapp.category)
           setCollected(true)
+          playGiftChime()
         }}
       />
       <primitive object={scene} />

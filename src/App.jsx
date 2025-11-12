@@ -5,6 +5,7 @@ import Experience from './components/Experience'
 import MiniMap from './components/MiniMap'
 import DappOverlay from './components/DappOverlay'
 import GameplayHUD from './components/GameplayHUD.jsx'
+import AmbientAudio from './components/AmbientAudio.jsx'
 import { SledInputProvider, useSledInput } from './components/SledInputContext.jsx'
 import './styles/index.css'
 
@@ -13,10 +14,6 @@ function App() {
     <SledInputProvider>
       <PointerCapture>
         <Canvas camera={{ position: [0, 10, 18], fov: 55 }}>
-          <fog attach="fog" args={['#0a1731', 12, 120]} />
-          <color attach="background" args={['#081633']} />
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[12, 18, 10]} intensity={1.2} castShadow />
           <Physics gravity={[0, -9.81, 0]}>
             <Experience />
           </Physics>
@@ -24,6 +21,7 @@ function App() {
         <MiniMap />
         <DappOverlay />
         <GameplayHUD />
+        <AmbientAudio />
       </PointerCapture>
     </SledInputProvider>
   )
