@@ -36,6 +36,11 @@ export const useQuestStore = create((set, get) => ({
       }
     }),
 
+  activateDapp: (dappId) =>
+    set({
+      activeDapp: dappId,
+    }),
+
   closeActiveDapp: () =>
     set({
       activeDapp: null,

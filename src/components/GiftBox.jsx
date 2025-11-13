@@ -1,9 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { CuboidCollider, RigidBody } from '@react-three/rapier'
 import { useGLTF } from '@react-three/drei'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { useQuestStore } from '../store/questStore'
-import { playGiftChime } from './AmbientAudio.jsx'
 
 const BOX_SIZE = 1.1
 const GIFT_VARIANTS = [
@@ -13,9 +11,7 @@ const GIFT_VARIANTS = [
   '/models/gift4.glb',
 ]
 
-export default function GiftBox({ dapp, position, renderVisual, onCollected }) {
-  const [collected, setCollected] = useState(false)
-  const collectDapp = useQuestStore((state) => state.collectDapp)
+export default function GiftBox({ dapp, position, renderVisual, collected, onActivate }) {
   const variantIndex = useMemo(() => Math.floor(Math.random() * GIFT_VARIANTS.length), [])
   const gift1 = useGLTF(GIFT_VARIANTS[0])
   const gift2 = useGLTF(GIFT_VARIANTS[1])
@@ -48,13 +44,11 @@ export default function GiftBox({ dapp, position, renderVisual, onCollected }) {
         args={[BOX_SIZE * 0.55, BOX_SIZE * 0.55, BOX_SIZE * 0.55]}
         sensor
         onIntersectionEnter={() => {
-          collectDapp(dapp.id, dapp.category)
-          setCollected(true)
-          playGiftChime()
-          onCollected?.(dapp)
+          if (collected) return
+          onActivate?.(dapp)
         }}
       />
-      {renderVisual ? renderVisual({ collected }) : <primitive object={scene} />}
+      {renderVisual ? renderVisual({ collected: !!collected }) : <primitive object={scene} />}
     </RigidBody>
   )
 }

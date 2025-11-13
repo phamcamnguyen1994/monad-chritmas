@@ -7,11 +7,11 @@ import { useGLTF } from '@react-three/drei'
 import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import * as THREE from 'three'
 
-export const TERRAIN_SIZE = 360
+export const TERRAIN_SIZE = 1080
 export const TERRAIN_HALF = TERRAIN_SIZE / 2
-export const SEGMENTS = 240
-const SNOW_PARTICLE_COUNT = 1400
-const TREE_COUNT = 320
+export const SEGMENTS = 360
+const SNOW_PARTICLE_COUNT = 2400
+const TREE_COUNT = 720
 
 const TREE_VARIANTS = [
   '/models/pine1.glb',
@@ -61,7 +61,8 @@ export default function WinterWorld({ onTerrainReady, onSeedReady, atmosphere })
     }
   }, [seed])
 
-  const heights = useMemo(() => generateHeightField(SEGMENTS, 6, noiseLayers), [noiseLayers])
+  const terrainAmplitude = useMemo(() => Math.max(6, TERRAIN_SIZE / 90), [])
+  const heights = useMemo(() => generateHeightField(SEGMENTS, terrainAmplitude, noiseLayers), [noiseLayers, terrainAmplitude])
   const heightStats = useMemo(() => computeHeightStats(heights), [heights])
   const heightSampler = useMemo(() => createHeightSampler(heights), [heights])
 
@@ -74,6 +75,7 @@ export default function WinterWorld({ onTerrainReady, onSeedReady, atmosphere })
 
   function generateHeightField(size, amplitude, layers) {
     const data = new Float32Array((size + 1) * (size + 1))
+    const ridgeStrength = THREE.MathUtils.clamp((TERRAIN_SIZE / 360) * 0.32, 0.28, 0.65)
     for (let z = 0; z <= size; z += 1) {
       for (let x = 0; x <= size; x += 1) {
         const idx = z * (size + 1) + x
@@ -82,7 +84,7 @@ export default function WinterWorld({ onTerrainReady, onSeedReady, atmosphere })
         const falloff = THREE.MathUtils.clamp(1 - Math.pow(Math.sqrt(nx * nx + nz * nz), 1.6), 0, 1)
         const noise = layeredNoise(nx * 2, nz * 2, layers) * amplitude
         const ridge = Math.sin(nx * 6.5) * Math.cos(nz * 5.8) * 1.2
-        data[idx] = (noise + ridge * 0.35) * falloff
+        data[idx] = (noise + ridge * ridgeStrength) * falloff
       }
     }
     return data
@@ -176,17 +178,19 @@ function computeHeightStats(heights) {
     return plane
   }, [heights, heightStats])
 
+  const snowSpread = TERRAIN_SIZE * 1.25
+
   const snowPositions = useMemo(() => {
     const rng = alea(`${seed}-snow`)
     const arr = new Float32Array(SNOW_PARTICLE_COUNT * 3)
     for (let i = 0; i < SNOW_PARTICLE_COUNT; i += 1) {
       const idx = i * 3
-      arr[idx] = (rng() - 0.5) * TERRAIN_SIZE * 0.8
-      arr[idx + 1] = rng() * 30 + 10
-      arr[idx + 2] = (rng() - 0.5) * TERRAIN_SIZE * 0.8
+      arr[idx] = (rng() - 0.5) * snowSpread
+      arr[idx + 1] = rng() * 36 + 12
+      arr[idx + 2] = (rng() - 0.5) * snowSpread
     }
     return arr
-  }, [seed])
+  }, [seed, snowSpread])
 
   const snowTexture = useMemo(() => {
     if (typeof document === 'undefined') return null
@@ -221,16 +225,16 @@ function computeHeightStats(heights) {
     const positions = snow.geometry.attributes.position
     const windX = dir.x * windStrength.current.value * 3.6 * snowIntensity
     const windZ = dir.y * windStrength.current.value * 3.6 * snowIntensity
-    const fallBase = (2.6 + windStrength.current.value * 1.1) * snowIntensity
+    const fallBase = (3.4 + windStrength.current.value * 1.25) * snowIntensity
     for (let i = 0; i < SNOW_PARTICLE_COUNT; i += 1) {
       const idx = i * 3
       positions.array[idx] += windX * delta
       positions.array[idx + 1] -= delta * fallBase
       positions.array[idx + 2] += windZ * delta
       if (positions.array[idx + 1] < 0) {
-        positions.array[idx] = (Math.random() - 0.5) * TERRAIN_SIZE * 0.8
-        positions.array[idx + 1] = Math.random() * 30 + 10
-        positions.array[idx + 2] = (Math.random() - 0.5) * TERRAIN_SIZE * 0.8
+        positions.array[idx] = (Math.random() - 0.5) * snowSpread
+        positions.array[idx + 1] = Math.random() * 36 + 12
+        positions.array[idx + 2] = (Math.random() - 0.5) * snowSpread
       }
     }
     positions.needsUpdate = true
@@ -290,7 +294,7 @@ function computeHeightStats(heights) {
     const maxRadius = TERRAIN_SIZE * 0.48
     const minRadius = 6
     let attempts = 0
-    const maxAttempts = TREE_COUNT * 12
+    const maxAttempts = TREE_COUNT * 18
 
     const rng = alea(`${seed}-trees`)
     while (trees.length < TREE_COUNT && attempts < maxAttempts) {
@@ -306,7 +310,7 @@ function computeHeightStats(heights) {
       const y = heights[idx] ?? 0
 
       const densityFactor = radius / maxRadius
-      const minSpacing = THREE.MathUtils.lerp(3.2, 8.5, densityFactor)
+      const minSpacing = THREE.MathUtils.lerp(3.8, 9.6, densityFactor)
       let tooClose = false
       for (let i = 0; i < trees.length; i += 1) {
         const existing = trees[i].position
@@ -319,10 +323,21 @@ function computeHeightStats(heights) {
       }
       if (tooClose) continue
 
-      const scale = 3.8 + rng() * 2.4
+      const tallnessPreference = THREE.MathUtils.lerp(0.45, 1.0, 1 - densityFactor)
+      const randomJitter = rng()
+      const baseScale = 5.6
+      const extraTall = THREE.MathUtils.lerp(1.6, 2.4, tallnessPreference)
+      const shortVariance = THREE.MathUtils.lerp(0.35, 0.85, randomJitter)
+      const scale = baseScale + extraTall * randomJitter + shortVariance
+      const nonUniformScale = {
+        x: THREE.MathUtils.lerp(0.86, 1.08, rng()),
+        z: THREE.MathUtils.lerp(0.86, 1.12, rng()),
+      }
+
       trees.push({
         position: [x, y + 1.2, z],
         scale,
+        scaleXZ: nonUniformScale,
         colliderHalfHeight: scale * 0.95,
         colliderRadius: scale * 0.36,
         variant: Math.floor(rng() * TREE_VARIANTS.length),
@@ -499,7 +514,12 @@ transformed.xz += swayOffset;
             args={[tree.colliderHalfHeight, tree.colliderRadius]}
             position={[0, tree.colliderHalfHeight, 0]}
           />
-          <primitive object={tree.scene} scale={tree.scale} castShadow receiveShadow />
+          <primitive
+            object={tree.scene}
+            scale={[tree.scale * tree.scaleXZ.x, tree.scale, tree.scale * tree.scaleXZ.z]}
+            castShadow
+            receiveShadow
+          />
         </RigidBody>
       ))}
 
@@ -513,7 +533,7 @@ transformed.xz += swayOffset;
           />
         </bufferGeometry>
         <pointsMaterial
-          size={0.25}
+          size={0.28}
           color="#ffffff"
           sizeAttenuation
           transparent

@@ -3,7 +3,6 @@ import { Canvas } from '@react-three/fiber'
 import { Physics } from '@react-three/rapier'
 import Experience from './components/Experience'
 import MiniMap from './components/MiniMap'
-import DappOverlay from './components/DappOverlay'
 import GameplayHUD from './components/GameplayHUD.jsx'
 import AmbientAudio from './components/AmbientAudio.jsx'
 import { DappDataProvider } from './hooks/useDappData.jsx'
@@ -21,7 +20,6 @@ function App() {
             </Physics>
           </Canvas>
           <MiniMap />
-          <DappOverlay />
           <GameplayHUD />
           <AmbientAudio />
         </PointerCapture>

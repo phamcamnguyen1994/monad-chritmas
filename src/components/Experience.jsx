@@ -7,9 +7,11 @@ import DiscoveredDapps from './DiscoveredDapps'
 import { useQuestStore } from '../store/questStore'
 import * as THREE from 'three'
 import { useSledInput } from './SledInputContext.jsx'
-import { Html, shaderMaterial, Billboard } from '@react-three/drei'
+import { Html, shaderMaterial, Billboard, useGLTF } from '@react-three/drei'
 import { useDappData } from '../hooks/useDappData.jsx'
 import alea from 'alea'
+import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { playGiftChime } from './AmbientAudio.jsx'
 
 const HEAD_HEIGHT = 1.45
 
@@ -548,8 +550,8 @@ function WildlifeManager({ terrainInfo, worldSeed }) {
 
   const spawnAnimal = useCallback(() => {
     const baseAngle = nextRandom() * Math.PI * 2
-    const minR = 28
-    const maxR = 60
+    const minR = Math.max(38, TERRAIN_HALF * 0.18)
+    const maxR = TERRAIN_HALF * 0.75
     const distance = minR + nextRandom() * (maxR - minR)
     const x = Math.cos(baseAngle) * distance
     const z = Math.sin(baseAngle) * distance
@@ -606,32 +608,86 @@ function WildlifeManager({ terrainInfo, worldSeed }) {
   )
 }
 
+const TREE_MODEL_PATHS = ['/models/pine1.glb', '/models/pine2.glb', '/models/pine3.glb', '/models/pine4.glb']
+
+TREE_MODEL_PATHS.forEach((path) => {
+  useGLTF.preload(path)
+})
+
 function SnowTreeVisual({ collected, variant = 0 }) {
-  const scale = collected ? 0.2 : 1
-  const hueShift = variant * 0.05
-  const foliageColor = new THREE.Color().setHSL(0.38 - hueShift, 0.42, 0.36 + hueShift * 0.3)
+  const pine1 = useGLTF(TREE_MODEL_PATHS[0])
+  const pine2 = useGLTF(TREE_MODEL_PATHS[1])
+  const pine3 = useGLTF(TREE_MODEL_PATHS[2])
+  const pine4 = useGLTF(TREE_MODEL_PATHS[3])
+  const pineVariants = useMemo(() => [pine1, pine2, pine3, pine4], [pine1, pine2, pine3, pine4])
+
+  const variantIndex = useMemo(() => {
+    const count = pineVariants.length
+    if (!count) return 0
+    if (typeof variant === 'number') {
+      if (Number.isFinite(variant)) {
+        if (variant >= 0 && variant < 1) {
+          return Math.floor(variant * count) % count
+        }
+        return Math.abs(Math.floor(variant)) % count
+      }
+    }
+    return 0
+  }, [variant, pineVariants])
+
+  const selected = pineVariants[variantIndex]
+
+  if (!selected || !selected.scene) {
+    return null
+  }
+
+  const variantSeed = useMemo(() => {
+    if (typeof variant === 'number' && Number.isFinite(variant)) {
+      const frac = variant - Math.floor(variant)
+      return frac < 0 ? frac + 1 : frac
+    }
+    return 0
+  }, [variant])
+
+  const treeScene = useMemo(() => {
+    if (!selected?.scene) return null
+    const cloned = clone(selected.scene)
+    const rotationOffset = Math.random() * Math.PI * 2
+    cloned.rotation.y = rotationOffset
+    cloned.traverse((child) => {
+      if (!child.isMesh) return
+      child.castShadow = true
+      child.receiveShadow = true
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map((mat) => (mat ? mat.clone() : mat))
+      } else if (child.material) {
+        child.material = child.material.clone()
+      }
+    })
+    return cloned
+  }, [selected])
+
+  const { scaleX, scaleY, scaleZ } = useMemo(() => {
+    if (collected) {
+      return {
+        scaleX: 0.26,
+        scaleY: 0.3,
+        scaleZ: 0.26,
+      }
+    }
+    const heightBoost = 1.55 + variantSeed * 1.05
+    const girthBase = 1.18 + variantSeed * 0.48
+    const girthSkew = 0.92 + Math.sin(variantSeed * Math.PI * 2) * 0.08
+    return {
+      scaleX: girthBase * girthSkew,
+      scaleY: heightBoost,
+      scaleZ: girthBase / girthSkew,
+    }
+  }, [collected, variantSeed])
+
   return (
-    <group scale={scale}>
-      <mesh position={[0, 0.45, 0]}>
-        <cylinderGeometry args={[0.12, 0.12, 0.9, 6]} />
-        <meshStandardMaterial color="#3b2f1e" />
-      </mesh>
-      <mesh position={[0, 1.0, 0]}>
-        <coneGeometry args={[0.9, 1.2, 9]} />
-        <meshStandardMaterial color={foliageColor} roughness={0.55} />
-      </mesh>
-      <mesh position={[0, 1.6, 0]} scale={[0.75, 0.75, 0.75]}>
-        <coneGeometry args={[0.7, 1.1, 8]} />
-        <meshStandardMaterial color={foliageColor.clone().offsetHSL(0, 0.05, 0.1)} roughness={0.55} />
-      </mesh>
-      <mesh position={[0, 2.1, 0]} scale={[0.55, 0.55, 0.55]}>
-        <coneGeometry args={[0.6, 0.9, 7]} />
-        <meshStandardMaterial color={foliageColor.clone().offsetHSL(-0.03, 0.02, 0.08)} roughness={0.55} />
-      </mesh>
-      <mesh position={[0, 2.6, 0]}>
-        <sphereGeometry args={[0.12, 12, 12]} />
-        <meshStandardMaterial emissive="#fde047" emissiveIntensity={0.9} color="#fef9c3" />
-      </mesh>
+    <group scale={[scaleX, scaleY, scaleZ]} position={[0, 0, 0]}>
+      {treeScene ? <primitive object={treeScene} /> : null}
     </group>
   )
 }
@@ -666,6 +722,11 @@ function DappMarker({ entry }) {
   const baseColor = trending ? '#fcd34d' : '#60a5fa'
   const [collected, setCollected] = useState(false)
   const playerPos = useQuestStore((state) => state.playerPosition)
+  const activeDapp = useQuestStore((state) => state.activeDapp)
+  const closeActiveDapp = useQuestStore((state) => state.closeActiveDapp)
+  const activateDapp = useQuestStore((state) => state.activateDapp)
+  const collectDapp = useQuestStore((state) => state.collectDapp)
+  const discovered = useQuestStore((state) => state.discoveredDapps)
   const distance = useMemo(() => {
     if (!playerPos) return Infinity
     const dx = (playerPos.x ?? 0) - position[0]
@@ -675,6 +736,34 @@ function DappMarker({ entry }) {
   const showHint = !collected && distance < (trending ? 20 : 14)
   const glowIntensity = !collected ? (showHint ? (trending ? 1.3 : 0.9) : 0.2) : 0
   const logoTexture = useLogoTexture(dapp.logo)
+  const isActive = activeDapp === dapp.id
+  const { categories } = useDappData()
+  const related = useMemo(() => {
+    if (!dapp) return []
+    const category = categories?.find((cat) => cat.id === dapp.category)
+    if (!category?.items) return []
+    return category.items.filter((item) => item.id !== dapp.id).slice(0, 3)
+  }, [categories, dapp])
+
+  const handleVisit = useCallback(
+    (event) => {
+      event?.stopPropagation?.()
+      if (dapp.website) {
+        window.open(dapp.website, '_blank', 'noopener,noreferrer')
+      }
+    },
+    [dapp.website]
+  )
+
+  const handleTwitter = useCallback(
+    (event) => {
+      event?.stopPropagation?.()
+      if (dapp.twitter) {
+        window.open(dapp.twitter, '_blank', 'noopener,noreferrer')
+      }
+    },
+    [dapp.twitter]
+  )
 
   const renderVisual = useMemo(() => {
     if (representation === 'tree') {
@@ -687,13 +776,22 @@ function DappMarker({ entry }) {
     return null
   }, [representation, treeVariant, animalKind])
 
+  useEffect(() => {
+    if (discovered?.includes(dapp.id)) {
+      setCollected(true)
+    }
+  }, [discovered, dapp.id])
+
   return (
     <group>
       <GiftBox
         dapp={dapp}
         position={position}
         renderVisual={renderVisual || undefined}
-        onCollected={() => setCollected(true)}
+        collected={collected}
+        onActivate={(target) => {
+          if (!collected) activateDapp(target.id)
+        }}
       />
       {!collected ? (
         <mesh position={[position[0], position[1] + (representation === 'gift' ? 0.8 : 1.2), position[2]]}>
@@ -748,6 +846,83 @@ function DappMarker({ entry }) {
           )}
         </>
       ) : null}
+      {isActive ? (
+        <Billboard position={[position[0], position[1] + 2.6, position[2]]} follow lockZ>
+          <Html
+            transform
+            distanceFactor={18}
+            center
+            occlude
+            style={{ pointerEvents: 'auto' }}
+          >
+            <div
+              className="overlay-card"
+              style={{
+                width: 320,
+                maxWidth: 'min(92vw, 420px)',
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+            >
+              <header className="overlay-header" style={{ marginBottom: 12 }}>
+                <div>
+                  <p className="overlay-subtitle">{dapp.category}</p>
+                  <h2 className="overlay-title" style={{ fontSize: 20 }}>
+                    {dapp.name}
+                  </h2>
+                </div>
+                <button type="button" onClick={closeActiveDapp} className="overlay-close">
+                  ×
+                </button>
+              </header>
+              <p className="overlay-description" style={{ marginBottom: 14 }}>
+                {dapp.description}
+              </p>
+              <div className="overlay-actions" style={{ marginBottom: 14 }}>
+                <button type="button" onClick={handleVisit} className="overlay-action vote">
+                  Open Website
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    collectDapp(dapp.id, dapp.category)
+                    setCollected(true)
+                    playGiftChime()
+                    closeActiveDapp()
+                  }}
+                  className="overlay-action collect"
+                  disabled={collected}
+                >
+                  {collected ? 'Collected' : 'Collect Badge'}
+                </button>
+              </div>
+              <div className="overlay-meta" style={{ marginBottom: related.length ? 14 : 0 }}>
+                <span>TVL: {dapp.tvlUsd ? `$${(dapp.tvlUsd / 1_000_000).toFixed(1)}M` : 'N/A'}</span>
+                <span>Users 24h: {dapp.users24h ? dapp.users24h.toLocaleString() : 'N/A'}</span>
+                <span>Status: {dapp.status}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                {dapp.twitter ? (
+                  <button type="button" onClick={handleTwitter} className="overlay-secondary-link">
+                    Twitter
+                  </button>
+                ) : null}
+              </div>
+              {related.length ? (
+                <div className="overlay-related">
+                  <h3>Suggested Next</h3>
+                  <ul>
+                    {related.map((item) => (
+                      <li key={item.id}>{item.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </Html>
+        </Billboard>
+      ) : null}
     </group>
   )
 }
@@ -786,28 +961,29 @@ export default function Experience() {
     if (!worldSeed) return null
     const rng = alea(`${worldSeed}-atmo`)
     const storm = rng() < 0.28
+    const fogScale = Math.max(1.2, TERRAIN_HALF / 180)
     const skyPalette = [
-      { skyBase: '#0a1632', auroraTop: '#6ef8ff', auroraBottom: '#102849', sparkleColor: '#dbeafe' },
-      { skyBase: '#11182b', auroraTop: '#f0abfc', auroraBottom: '#271443', sparkleColor: '#f5d0fe' },
-      { skyBase: '#041b24', auroraTop: '#5eead4', auroraBottom: '#0f1f3a', sparkleColor: '#cffafe' },
-      { skyBase: '#210b2a', auroraTop: '#fb7185', auroraBottom: '#1a0d29', sparkleColor: '#fda4af' },
+      { skyBase: '#0d2344', auroraTop: '#6ef8ff', auroraBottom: '#13315c', sparkleColor: '#dbeafe' },
+      { skyBase: '#14223c', auroraTop: '#f0abfc', auroraBottom: '#311d58', sparkleColor: '#f5d0fe' },
+      { skyBase: '#062a3c', auroraTop: '#5eead4', auroraBottom: '#102c4b', sparkleColor: '#cffafe' },
+      { skyBase: '#321437', auroraTop: '#fb7185', auroraBottom: '#231638', sparkleColor: '#fda4af' },
     ]
     const variant = skyPalette[Math.floor(rng() * skyPalette.length)]
     const lightLevel = rng()
     const windBase = 0.32 + rng() * 0.35 + (storm ? 0.18 : 0)
     return {
       ...variant,
-      fogColor: storm ? '#0b1320' : '#0a1932',
-      fogNear: storm ? 10 + rng() * 10 : 18 + rng() * 24,
-      fogFar: storm ? 70 + rng() * 40 : 140 + rng() * 90,
+      fogColor: storm ? '#10243f' : '#102b4c',
+      fogNear: (storm ? 10 + rng() * 12 : 22 + rng() * 32) * fogScale,
+      fogFar: (storm ? 90 + rng() * 60 : 210 + rng() * 160) * fogScale,
       auroraHueShift: storm ? 0.06 : 0.03 + rng() * 0.02,
       auroraSatShift: 0.14 + rng() * 0.05,
       auroraLightShift: 0.08 + rng() * 0.05,
-      ambientIntensity: 0.32 + lightLevel * 0.22,
-      sunIntensity: storm ? 1.35 + lightLevel * 0.2 : 1.55 + lightLevel * 0.45,
-      sunColor: storm ? '#bcd7ff' : '#dbe7ff',
-      skyLightColor: storm ? '#6fb3ff' : '#8dd6ff',
-      backLightColor: storm ? '#ffb3a7' : '#ff9d82',
+      ambientIntensity: 0.42 + lightLevel * 0.24,
+      sunIntensity: storm ? 1.55 + lightLevel * 0.25 : 1.85 + lightLevel * 0.55,
+      sunColor: storm ? '#cfe5ff' : '#e2f1ff',
+      skyLightColor: storm ? '#78c5ff' : '#9ad8ff',
+      backLightColor: storm ? '#ffc3b6' : '#ffad92',
       windBase,
       windGust: 0.18 + rng() * 0.3 + (storm ? 0.14 : 0),
       snowIntensity: storm ? 1.8 + rng() * 0.6 : 0.9 + rng() * 0.5,
@@ -846,6 +1022,7 @@ export default function Experience() {
     const rng = alea(`${worldSeed}-gifts`)
     const placements = []
     const trendingSet = new Set((trending ?? []).map((item) => item.id))
+    const outerLimit = TERRAIN_HALF * 0.94
 
     const minDistanceSq = (pointA, pointB) => {
       const dx = pointA[0] - pointB[0]
@@ -853,83 +1030,72 @@ export default function Experience() {
       return dx * dx + dz * dz
     }
 
-    const placeDapp = (dapp, options = {}) => {
-      const {
-        radiusMin = 8,
-        radiusMax = TERRAIN_HALF * 0.86,
-        baseAngle = rng() * Math.PI * 2,
-        angleSpread = Math.PI,
-        minSpacing = trendingSet.has(dapp.id) ? 11 : 6 + rng() * 2,
-      } = options
-      let position = null
-      const maxAttempts = 40
-      const minSpacingSq = minSpacing * minSpacing
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const radius = radiusMin + rng() * (radiusMax - radiusMin)
-        const angle = baseAngle + (rng() - 0.5) * angleSpread
-        const x = Math.cos(angle) * radius
-        const z = Math.sin(angle) * radius
-        const groundHeight = sampler(x, z)
-        if (groundHeight != null) {
-          position = [x, groundHeight + 0.95, z]
-          const tooClose = placements.some((entry) => {
-            return minDistanceSq(entry.position, position) < minSpacingSq
-          })
-          if (tooClose) {
-            position = null
-            continue
-          }
-          const hintDistance = 2 + rng() * 1.5
-          const hintAngle = angle + (rng() - 0.5) * 0.6
-          const hint = [x + Math.cos(hintAngle) * hintDistance, groundHeight + 0.6, z + Math.sin(hintAngle) * hintDistance]
-          const isTrending = trendingSet.has(dapp.id)
-          const representation = isTrending
-            ? 'gift'
-            : rng() < 0.3
-            ? 'animal'
-            : rng() < 0.55
-            ? 'tree'
-            : 'gift'
-          const animalKind = representation === 'animal' ? (rng() > 0.5 ? 'fox' : 'penguin') : null
-          const treeVariant = representation === 'tree' ? rng() : null
-          placements.push({
-            dapp,
-            position,
-            hint,
-            zone: dapp.category,
-            trending: isTrending,
-            representation,
-            animalKind,
-            treeVariant,
-          })
-          break
-        }
+    const baseProfiles = {
+      defi: { min: outerLimit * 0.1, max: outerLimit * 0.45, bias: 1.18 },
+      infra: { min: outerLimit * 0.16, max: outerLimit * 0.7, bias: 1.05 },
+      gaming: { min: outerLimit * 0.32, max: outerLimit, bias: 0.68 },
+      nft: { min: outerLimit * 0.24, max: outerLimit * 0.92, bias: 0.8 },
+      social: { min: outerLimit * 0.2, max: outerLimit * 0.82, bias: 0.88 },
+      payments: { min: outerLimit * 0.14, max: outerLimit * 0.6, bias: 1 },
+      default: { min: outerLimit * 0.18, max: outerLimit * 0.85, bias: 0.9 },
+    }
+
+    const clampProfile = (profile) => {
+      const min = Math.max(12, Math.min(profile.min ?? outerLimit * 0.2, outerLimit - 18))
+      const max = Math.max(min + 16, Math.min(profile.max ?? outerLimit, outerLimit))
+      return { min, max, bias: profile.bias ?? 0.9 }
+    }
+
+    const profileFor = (dapp) => {
+      const key = (dapp.category || '').toLowerCase()
+      return clampProfile(baseProfiles[key] ?? baseProfiles.default)
+    }
+
+    const chooseRepresentation = (isTrending) => {
+      if (isTrending) {
+        return { representation: 'gift', animalKind: null, treeVariant: null }
       }
-      if (!position) {
-        const fallbackAttempts = 80
-        for (let attempt = 0; attempt < fallbackAttempts; attempt += 1) {
-          const radius = 6 + rng() * (TERRAIN_HALF * 0.9 - 6)
+      const roll = rng()
+      if (roll < 0.28) {
+        return { representation: 'animal', animalKind: rng() > 0.5 ? 'fox' : 'penguin', treeVariant: null }
+      }
+      if (roll < 0.58) {
+        return { representation: 'tree', animalKind: null, treeVariant: rng() }
+      }
+      return { representation: 'gift', animalKind: null, treeVariant: null }
+    }
+
+    const attemptPlacement = (dapp, options = {}) => {
+      const isTrending = options.trending ?? false
+      const baseProfile = clampProfile(options.profile ?? profileFor(dapp))
+      const baseBias = THREE.MathUtils.clamp(options.bias ?? baseProfile.bias, 0.25, 1.6)
+      const maxAttempts = options.maxAttempts ?? 100
+      const spacingOverride = options.minSpacing
+
+      const tryWithProfile = (profile, spacingScale = 1) => {
+        if (!(profile.max > profile.min)) return false
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          const sample = Math.max(rng(), 1e-4)
+          const radial = profile.min + Math.pow(sample, baseBias) * (profile.max - profile.min)
+          if (!Number.isFinite(radial) || radial <= 0) continue
           const angle = rng() * Math.PI * 2
-          const x = Math.cos(angle) * radius
-          const z = Math.sin(angle) * radius
+          const x = Math.cos(angle) * radial
+          const z = Math.sin(angle) * radial
           const groundHeight = sampler(x, z)
           if (groundHeight == null) continue
+          const radiusRatio = Math.min(1, radial / outerLimit)
+          const spacingBase = spacingOverride ?? Math.max(18, THREE.MathUtils.lerp(20, 40, radiusRatio))
+          const minSpacing = Math.max(14, spacingBase * spacingScale)
           const candidate = [x, groundHeight + 0.95, z]
-          const tooClose = placements.some((entry) => minDistanceSq(entry.position, candidate) < (minSpacing * 0.6) ** 2)
+          const tooClose = placements.some((entry) => minDistanceSq(entry.position, candidate) < minSpacing * minSpacing)
           if (tooClose) continue
-          const hintDistance = 1.5 + rng() * 1.2
-          const hintAngle = angle + (rng() - 0.5) * 0.8
-          const hint = [x + Math.cos(hintAngle) * hintDistance, groundHeight + 0.6, z + Math.sin(hintAngle) * hintDistance]
-          const isTrending = trendingSet.has(dapp.id)
-          const representation = isTrending
-            ? 'gift'
-            : rng() < 0.3
-            ? 'animal'
-            : rng() < 0.6
-            ? 'tree'
-            : 'gift'
-          const animalKind = representation === 'animal' ? (rng() > 0.5 ? 'fox' : 'penguin') : null
-          const treeVariant = representation === 'tree' ? rng() : null
+
+          const hintDistanceBase = Math.min(8.5, 1.9 + radial * 0.045)
+          const hintDistance = hintDistanceBase * (0.85 + rng() * 0.55)
+          const hintAngle = angle + (rng() - 0.5) * 0.9
+          const hint = [x + Math.cos(hintAngle) * hintDistance, groundHeight + 0.7, z + Math.sin(hintAngle) * hintDistance]
+
+          const { representation, animalKind, treeVariant } = chooseRepresentation(isTrending)
           placements.push({
             dapp,
             position: candidate,
@@ -940,47 +1106,55 @@ export default function Experience() {
             animalKind,
             treeVariant,
           })
-          position = candidate
-          break
+          return true
         }
+        return false
       }
+
+      if (tryWithProfile(baseProfile, 1)) return true
+
+      const relaxedProfile = clampProfile({
+        min: baseProfile.min * 0.88,
+        max: Math.min(outerLimit, baseProfile.max * 1.08),
+        bias: baseBias,
+      })
+
+      return tryWithProfile(relaxedProfile, 0.8)
     }
 
-    // Trending dapps near trung tâm
     const trendingList = trending ?? []
     trendingList.forEach((dapp, index) => {
-      placeDapp(dapp, {
-        radiusMin: 8 + index * 2,
-        radiusMax: 24 + index * 2,
-        angleSpread: Math.PI / 3,
-        minSpacing: 12,
+      const startFactor = 0.05 + index * 0.015
+      const endFactor = 0.16 + index * 0.03
+      const trendingProfile = {
+        min: outerLimit * startFactor,
+        max: outerLimit * endFactor,
+        bias: 0.4,
+      }
+      attemptPlacement(dapp, {
+        profile: trendingProfile,
+        bias: 0.35,
+        minSpacing: Math.max(24, outerLimit * 0.07),
+        maxAttempts: 140,
+        trending: true,
       })
     })
 
     const otherDapps = dapps.filter((dapp) => !trendingSet.has(dapp.id))
-    // shuffle
     for (let i = otherDapps.length - 1; i > 0; i -= 1) {
       const j = Math.floor(rng() * (i + 1))
       ;[otherDapps[i], otherDapps[j]] = [otherDapps[j], otherDapps[i]]
     }
 
-    const innerRadius = TERRAIN_HALF * 0.25
-    const outerRadius = TERRAIN_HALF * 0.86
-
-    let placedCount = 0
     otherDapps.forEach((dapp) => {
-      if (rng() > 0.5) {
-        return
-      }
-      const ring = Math.floor(placedCount / 40)
-      const radiusMin = Math.min(innerRadius + ring * 8, outerRadius - 6)
-      const radiusMax = Math.min(radiusMin + 20, outerRadius)
-      placeDapp(dapp, {
-        radiusMin,
-        radiusMax,
-        angleSpread: Math.PI,
+      if (rng() > 0.5) return
+      const profile = profileFor(dapp)
+      const biasJitter = THREE.MathUtils.clamp(profile.bias * (0.9 + (rng() - 0.5) * 0.2), 0.25, 1.6)
+      attemptPlacement(dapp, {
+        profile,
+        bias: biasJitter,
+        minSpacing: undefined,
       })
-      placedCount += 1
     })
 
     return placements
