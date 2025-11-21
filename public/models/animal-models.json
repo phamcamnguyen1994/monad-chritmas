@@ -1,0 +1,10 @@
+{
+  "files": [
+    "animalpenguin1.glb",
+    "animalpenguin2.glb",
+    "animalfox1.glb",
+    "animalfox2.glb"
+  ],
+  "note": "Thêm tên file mới vào array 'files' ở trên. File phải có trong thư mục public/models/"
+}
+
