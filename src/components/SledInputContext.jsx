@@ -205,6 +205,19 @@ export function SledInputProvider({ children }) {
 
   const handlePointerDown = useCallback(
     (event) => {
+      // Don't capture pointer events for UI elements (buttons, inputs, etc.)
+      const target = event.target
+      if (target && (
+        target.tagName === 'BUTTON' ||
+        target.tagName === 'INPUT' ||
+        target.closest('button') ||
+        target.closest('.wallet-connect-container') ||
+        target.closest('.hud-wallet-section') ||
+        target.closest('.wallet-menu')
+      )) {
+        return // Let UI elements handle their own events
+      }
+      
       if (pointerLockActive) return
       if (event.pointerType === 'mouse') {
         if (event.button === 2 || event.button === 1 || event.button === 0) {
@@ -215,7 +228,14 @@ export function SledInputProvider({ children }) {
             lastX: event.clientX,
             lastY: event.clientY,
           }
-          event.currentTarget?.setPointerCapture?.(event.pointerId)
+          try {
+            if (event.currentTarget && typeof event.currentTarget.setPointerCapture === 'function') {
+              event.currentTarget.setPointerCapture(event.pointerId)
+            }
+          } catch (err) {
+            // Ignore setPointerCapture errors (element may not be ready)
+            console.warn('setPointerCapture failed:', err)
+          }
           setIsDragging(true)
           event.preventDefault()
         }

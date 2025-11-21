@@ -67,7 +67,16 @@ function PointerCapture({ children }) {
     <div
       ref={containerRef}
       className="app-shell"
-      onPointerDown={handlePointerDown}
+      onPointerDown={(e) => {
+        // Don't capture events for UI elements
+        if (e.target.closest('.wallet-connect-container') || 
+            e.target.closest('.hud-wallet-section') ||
+            e.target.closest('button') ||
+            e.target.closest('.wallet-menu')) {
+          return
+        }
+        handlePointerDown(e)
+      }}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}

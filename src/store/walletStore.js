@@ -16,6 +16,10 @@ const MONAD_TESTNET = {
   blockExplorerUrls: ['https://testnet-explorer.monad.xyz'],
 }
 
+// Store event handlers outside of state to avoid serialization issues
+let accountsChangedHandler = null
+let chainChangedHandler = null
+
 export const useWalletStore = create(
   persist(
     (set, get) => ({

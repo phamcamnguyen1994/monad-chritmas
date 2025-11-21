@@ -265,6 +265,13 @@ body,
   padding: 24px;
 }
 
+/* Ensure wallet section has proper pointer events */
+.hud-wallet-section {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 100;
+}
+
 /* Controls Section - Bottom Left */
 .hud-controls-section {
   position: absolute;
@@ -543,10 +550,16 @@ body,
   right: 32px;
   pointer-events: none;
   /* Let children handle events */
-  z-index: 30;
+  z-index: 10000;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+}
+
+.hud-top-right > * {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 10001;
 }
 
 /* Quest Board */
@@ -755,6 +768,8 @@ body,
 
 .wallet-connect-container {
   position: relative;
+  pointer-events: auto !important;
+  z-index: 1000;
 }
 
 .wallet-connect-btn,
@@ -773,6 +788,9 @@ body,
   transition: all 0.2s;
   width: 100%;
   justify-content: center;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 10001;
 }
 
 .wallet-connect-btn:hover:not(:disabled) {
@@ -809,8 +827,10 @@ body,
   background: rgba(13, 21, 44, 0.95);
   border: 1px solid rgba(74, 112, 182, 0.35);
   border-radius: 12px;
-  z-index: 100;
+  z-index: 99999 !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: auto !important;
+  isolation: isolate;
 }
 
 .wallet-menu-item {
@@ -845,11 +865,17 @@ body,
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  pointer-events: auto;
 }
 
 .wallet-disconnect-btn:hover {
   background: rgba(239, 68, 68, 0.3);
   border-color: rgba(239, 68, 68, 0.6);
+  transform: translateY(-1px);
+}
+
+.wallet-disconnect-btn:active {
+  transform: translateY(0);
 }
 
 .wallet-error {
@@ -870,6 +896,8 @@ body,
   background: rgba(13, 21, 44, 0.85);
   border: 1px solid rgba(74, 112, 182, 0.35);
   border-radius: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .hud-score-label {
@@ -890,6 +918,8 @@ body,
 /* Leaderboard Styles */
 .hud-leaderboard-section {
   margin-bottom: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .leaderboard-toggle {

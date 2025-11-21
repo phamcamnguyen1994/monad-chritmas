@@ -1,14 +1,32 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useWalletStore } from '../store/walletStore'
 
 export default function WalletConnect() {
   const { address, isConnected, isConnecting, error, connect, disconnect, checkConnection } = useWalletStore()
   const [showMenu, setShowMenu] = useState(false)
+  const menuRef = useRef(null)
+  const containerRef = useRef(null)
 
   useEffect(() => {
     // Check if already connected on mount
     checkConnection()
   }, [checkConnection])
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!showMenu) return
+
+    const handleClickOutside = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setShowMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showMenu])
 
   const handleConnect = async () => {
     try {
@@ -22,7 +40,10 @@ export default function WalletConnect() {
     }
   }
 
-  const handleDisconnect = () => {
+  const handleDisconnect = (e) => {
+    e?.preventDefault()
+    e?.stopPropagation()
+    console.log('Disconnect clicked')
     disconnect()
     setShowMenu(false)
   }
@@ -34,12 +55,20 @@ export default function WalletConnect() {
 
   if (!isConnected) {
     return (
-      <div className="wallet-connect-container">
+      <div className="wallet-connect-container" ref={containerRef}>
         <button
           type="button"
-          onClick={handleConnect}
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            handleConnect()
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+          }}
           disabled={isConnecting}
           className="wallet-connect-btn glass-panel"
+          style={{ pointerEvents: 'auto', zIndex: 10000, position: 'relative' }}
         >
           {isConnecting ? (
             <>
@@ -59,10 +88,13 @@ export default function WalletConnect() {
   }
 
   return (
-    <div className="wallet-connect-container">
+    <div className="wallet-connect-container" ref={containerRef}>
       <button
         type="button"
-        onClick={() => setShowMenu(!showMenu)}
+        onClick={(e) => {
+          e.stopPropagation()
+          setShowMenu(!showMenu)
+        }}
         className="wallet-connected-btn glass-panel"
       >
         <span className="wallet-connect-icon">🦊</span>
@@ -70,12 +102,25 @@ export default function WalletConnect() {
         <span className="wallet-menu-icon">{showMenu ? '▲' : '▼'}</span>
       </button>
       {showMenu && (
-        <div className="wallet-menu glass-panel">
+        <div 
+          ref={menuRef}
+          className="wallet-menu glass-panel"
+          onClick={(e) => e.stopPropagation()}
+          style={{ zIndex: 99999, position: 'relative' }}
+        >
           <div className="wallet-menu-item">
             <span className="wallet-menu-label">Address:</span>
             <span className="wallet-menu-value">{address}</span>
           </div>
-          <button type="button" onClick={handleDisconnect} className="wallet-disconnect-btn">
+          <button 
+            type="button" 
+            onClick={handleDisconnect}
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+            }}
+            className="wallet-disconnect-btn"
+          >
             Disconnect
           </button>
         </div>
