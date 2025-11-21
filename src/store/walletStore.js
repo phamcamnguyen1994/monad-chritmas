@@ -27,42 +27,89 @@ export const useWalletStore = create(
 
       // Connect wallet
       connect: async () => {
-        if (typeof window === 'undefined' || !window.ethereum) {
-          set({ error: 'MetaMask not installed. Please install MetaMask extension.' })
+        // Check for MetaMask or other injected providers
+        if (typeof window === 'undefined') {
+          set({ error: 'Window object not available' })
           return false
+        }
+
+        // Try to find ethereum provider
+        const ethereum = window.ethereum || (window.web3 && window.web3.currentProvider)
+        
+        if (!ethereum) {
+          set({ 
+            error: 'MetaMask not detected. Please install MetaMask extension or use a Web3-enabled browser.' 
+          })
+          return false
+        }
+
+        // Check if it's MetaMask specifically
+        const isMetaMask = ethereum.isMetaMask || ethereum._metamask
+        if (!isMetaMask) {
+          console.warn('Non-MetaMask provider detected:', ethereum)
         }
 
         set({ isConnecting: true, error: null })
 
         try {
           // Request account access
-          const accounts = await window.ethereum.request({
+          const accounts = await ethereum.request({
             method: 'eth_requestAccounts',
           })
 
-          if (accounts.length === 0) {
-            set({ isConnecting: false, error: 'No accounts found' })
+          if (!accounts || accounts.length === 0) {
+            set({ isConnecting: false, error: 'No accounts found. Please unlock MetaMask.' })
             return false
           }
 
           const address = accounts[0]
-          const chainId = window.ethereum.chainId
+          // Get chainId - handle both string and number formats
+          let chainId = ethereum.chainId
+          if (typeof chainId === 'number') {
+            chainId = `0x${chainId.toString(16)}`
+          }
 
           // Check if on correct network
           if (chainId !== MONAD_TESTNET_CHAIN_ID) {
             // Try to switch network
             try {
-              await window.ethereum.request({
+              await ethereum.request({
                 method: 'wallet_switchEthereumChain',
                 params: [{ chainId: MONAD_TESTNET_CHAIN_ID }],
               })
+              // Update chainId after switch
+              chainId = ethereum.chainId
+              if (typeof chainId === 'number') {
+                chainId = `0x${chainId.toString(16)}`
+              }
             } catch (switchError) {
               // If network doesn't exist, add it
-              if (switchError.code === 4902) {
-                await window.ethereum.request({
-                  method: 'wallet_addEthereumChain',
-                  params: [MONAD_TESTNET],
+              if (switchError.code === 4902 || switchError.code === -32603) {
+                try {
+                  await ethereum.request({
+                    method: 'wallet_addEthereumChain',
+                    params: [MONAD_TESTNET],
+                  })
+                  // Update chainId after adding
+                  chainId = ethereum.chainId
+                  if (typeof chainId === 'number') {
+                    chainId = `0x${chainId.toString(16)}`
+                  }
+                } catch (addError) {
+                  console.error('Failed to add Monad Testnet:', addError)
+                  set({ 
+                    isConnecting: false, 
+                    error: 'Failed to add Monad Testnet. Please add it manually in MetaMask.' 
+                  })
+                  return false
+                }
+              } else if (switchError.code === 4001) {
+                // User rejected the request
+                set({ 
+                  isConnecting: false, 
+                  error: 'Network switch was rejected. Please switch to Monad Testnet manually.' 
                 })
+                return false
               } else {
                 throw switchError
               }
@@ -72,34 +119,66 @@ export const useWalletStore = create(
           set({
             address,
             isConnected: true,
-            chainId: window.ethereum.chainId,
+            chainId: chainId,
             isConnecting: false,
             error: null,
           })
 
-          // Listen for account changes
-          window.ethereum.on('accountsChanged', (newAccounts) => {
+          // Remove old listeners to prevent duplicates
+          if (ethereum.removeListener) {
+            if (accountsChangedHandler) {
+              ethereum.removeListener('accountsChanged', accountsChangedHandler)
+            }
+            if (chainChangedHandler) {
+              ethereum.removeListener('chainChanged', chainChangedHandler)
+            }
+          }
+
+          // Set up account change handler
+          accountsChangedHandler = (newAccounts) => {
             if (newAccounts.length === 0) {
               get().disconnect()
             } else {
               set({ address: newAccounts[0] })
             }
-          })
+          }
 
-          // Listen for chain changes
-          window.ethereum.on('chainChanged', (newChainId) => {
+          // Set up chain change handler
+          chainChangedHandler = (newChainId) => {
+            // Convert to hex string if needed
+            if (typeof newChainId === 'number') {
+              newChainId = `0x${newChainId.toString(16)}`
+            }
             set({ chainId: newChainId })
             if (newChainId !== MONAD_TESTNET_CHAIN_ID) {
               set({ error: 'Please switch to Monad Testnet' })
+            } else {
+              set({ error: null })
             }
-          })
+          }
+
+          // Listen for account changes
+          ethereum.on('accountsChanged', accountsChangedHandler)
+
+          // Listen for chain changes
+          ethereum.on('chainChanged', chainChangedHandler)
 
           return true
         } catch (error) {
           console.error('Wallet connection error:', error)
+          let errorMessage = 'Failed to connect wallet'
+          
+          if (error.code === 4001) {
+            errorMessage = 'Connection rejected. Please approve the connection request in MetaMask.'
+          } else if (error.code === -32002) {
+            errorMessage = 'Connection request already pending. Please check MetaMask.'
+          } else if (error.message) {
+            errorMessage = error.message
+          }
+          
           set({
             isConnecting: false,
-            error: error.message || 'Failed to connect wallet',
+            error: errorMessage,
           })
           return false
         }
@@ -107,6 +186,19 @@ export const useWalletStore = create(
 
       // Disconnect wallet
       disconnect: () => {
+        // Remove event listeners if they exist
+        const ethereum = window.ethereum || (window.web3 && window.web3.currentProvider)
+        if (ethereum && ethereum.removeListener) {
+          if (accountsChangedHandler) {
+            ethereum.removeListener('accountsChanged', accountsChangedHandler)
+            accountsChangedHandler = null
+          }
+          if (chainChangedHandler) {
+            ethereum.removeListener('chainChanged', chainChangedHandler)
+            chainChangedHandler = null
+          }
+        }
+
         set({
           address: null,
           isConnected: false,
@@ -117,18 +209,26 @@ export const useWalletStore = create(
 
       // Check if already connected
       checkConnection: async () => {
-        if (typeof window === 'undefined' || !window.ethereum) {
+        if (typeof window === 'undefined') {
+          return false
+        }
+
+        const ethereum = window.ethereum || (window.web3 && window.web3.currentProvider)
+        if (!ethereum) {
           return false
         }
 
         try {
-          const accounts = await window.ethereum.request({
+          const accounts = await ethereum.request({
             method: 'eth_accounts',
           })
 
-          if (accounts.length > 0) {
+          if (accounts && accounts.length > 0) {
             const address = accounts[0]
-            const chainId = window.ethereum.chainId
+            let chainId = ethereum.chainId
+            if (typeof chainId === 'number') {
+              chainId = `0x${chainId.toString(16)}`
+            }
 
             set({
               address,
@@ -136,18 +236,41 @@ export const useWalletStore = create(
               chainId,
             })
 
-            // Set up listeners
-            window.ethereum.on('accountsChanged', (newAccounts) => {
+            // Remove old listeners to prevent duplicates
+            if (ethereum.removeListener) {
+              if (accountsChangedHandler) {
+                ethereum.removeListener('accountsChanged', accountsChangedHandler)
+              }
+              if (chainChangedHandler) {
+                ethereum.removeListener('chainChanged', chainChangedHandler)
+              }
+            }
+
+            // Set up account change handler
+            accountsChangedHandler = (newAccounts) => {
               if (newAccounts.length === 0) {
                 get().disconnect()
               } else {
                 set({ address: newAccounts[0] })
               }
-            })
+            }
 
-            window.ethereum.on('chainChanged', (newChainId) => {
+            // Set up chain change handler
+            chainChangedHandler = (newChainId) => {
+              if (typeof newChainId === 'number') {
+                newChainId = `0x${newChainId.toString(16)}`
+              }
               set({ chainId: newChainId })
-            })
+              if (newChainId !== MONAD_TESTNET_CHAIN_ID) {
+                set({ error: 'Please switch to Monad Testnet' })
+              } else {
+                set({ error: null })
+              }
+            }
+
+            // Set up listeners
+            ethereum.on('accountsChanged', accountsChangedHandler)
+            ethereum.on('chainChanged', chainChangedHandler)
 
             return true
           }

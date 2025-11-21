@@ -11,9 +11,14 @@ export default function WalletConnect() {
   }, [checkConnection])
 
   const handleConnect = async () => {
-    const success = await connect()
-    if (success) {
-      setShowMenu(false)
+    try {
+      const success = await connect()
+      if (success) {
+        setShowMenu(false)
+      }
+    } catch (err) {
+      console.error('Connect button error:', err)
+      // Error is already handled in the store
     }
   }
 
